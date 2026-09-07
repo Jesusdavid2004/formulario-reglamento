@@ -26,7 +26,10 @@ function render() {
       <td>${escapeHtml(employee.cargo)}</td>
       <td><span class="status ${employee.estado === 'FIRMADO' ? 'status-signed' : 'status-pending'}">${escapeHtml(employee.estado)}</span></td>
       <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/${employee.pdf_path || ''}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
-      <td><button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button></td>
+      <td class="actions-cell">
+        <button class="edit-button" type="button" data-cedula="${escapeHtml(employee.cedula)}">Editar</button>
+        <button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button>
+      </td>
     </tr>`).join('') || '<tr><td colspan="6" class="empty-state">No hay registros para este filtro.</td></tr>';
 }
 
@@ -72,6 +75,41 @@ clearFiltersButton.addEventListener('click', () => {
 });
 
 body.addEventListener('click', async (event) => {
+  const editButton = event.target.closest('.edit-button');
+  if (editButton) {
+    const employee = employees.find((item) => item.cedula === editButton.dataset.cedula);
+    if (!employee) return;
+    const row = editButton.closest('tr');
+    row.classList.add('editing-row');
+    row.querySelector('td:nth-child(2)').innerHTML = `
+      <input class="inline-input" data-edit="nombre" value="${escapeHtml(employee.nombre)}" aria-label="Nombre">
+      <small>${escapeHtml(employee.dependencia)}</small>`;
+    row.querySelector('td:nth-child(3)').innerHTML = '<input class="inline-input" data-edit="cargo" value="' + escapeHtml(employee.cargo) + '" aria-label="Cargo">';
+    row.querySelector('td:nth-child(2) small').outerHTML = '<input class="inline-input" data-edit="dependencia" value="' + escapeHtml(employee.dependencia) + '" aria-label="Dependencia">';
+    editButton.outerHTML = '<button class="save-button" type="button" data-cedula="' + escapeHtml(employee.cedula) + '">Guardar</button>';
+    return;
+  }
+
+  const saveButton = event.target.closest('.save-button');
+  if (saveButton) {
+    const row = saveButton.closest('tr');
+    const payload = Object.fromEntries([...row.querySelectorAll('[data-edit]')].map((input) => [input.dataset.edit, input.value.trim()]));
+    saveButton.disabled = true;
+    const response = await fetch(`/admin/empleados/${encodeURIComponent(saveButton.dataset.cedula)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok) {
+      window.alert(result.error || 'No fue posible guardar los cambios.');
+      saveButton.disabled = false;
+      return;
+    }
+    await loadEmployees();
+    return;
+  }
+
   const button = event.target.closest('.delete-button');
   if (!button) return;
   const cedula = button.dataset.cedula;

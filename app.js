@@ -296,6 +296,20 @@ app.delete('/admin/empleados/:cedula', (req, res) => {
   return res.json({ message: 'Registro eliminado correctamente' });
 });
 
+app.patch('/admin/empleados/:cedula', (req, res) => {
+  const cedula = clean(req.params.cedula);
+  const nombre = clean(req.body.nombre);
+  const cargo = clean(req.body.cargo);
+  const dependencia = clean(req.body.dependencia);
+  if (!nombre || !dependencia) return res.status(400).json({ error: 'Nombre y dependencia son obligatorios' });
+
+  const result = db.prepare(`
+    UPDATE empleados SET nombre = ?, cargo = ?, dependencia = ? WHERE cedula = ?
+  `).run(nombre, cargo, dependencia, cedula);
+  if (!result.changes) return res.status(404).json({ error: 'Empleado no encontrado' });
+  return res.json({ message: 'Empleado actualizado correctamente' });
+});
+
 app.get('/admin/qr', async (req, res) => {
   const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
   const accessUrl = `${baseUrl}/?acceso=${encodeURIComponent(ACCESS_TOKEN)}`;
