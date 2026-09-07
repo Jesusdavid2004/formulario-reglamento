@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Panel de entregas | Centro Pasto</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/admin.js" defer></script>
+</head>
+<body>
+  <main class="shell admin-shell">
+    <header class="admin-header">
+      <div>
+        <p class="eyebrow">Centro Pasto · Control administrativo</p>
+        <h1>Entrega de reglamentos</h1>
+        <p class="muted">Monitorea el avance y comparte el acceso con el equipo.</p>
+      </div>
+      <span class="button button-secondary">El formulario se abre solo con QR</span>
+    </header>
+
+    <section class="summary-grid" aria-label="Resumen">
+      <div class="summary-card"><span>Total</span><strong id="total-count">0</strong></div>
+      <div class="summary-card pending"><span>Pendientes</span><strong id="pending-count">0</strong></div>
+      <div class="summary-card signed"><span>Firmados</span><strong id="signed-count">0</strong></div>
+      <div class="summary-card progress-card"><span>Avance</span><strong id="progress-count">0%</strong></div>
+    </section>
+
+    <section class="admin-grid">
+      <div class="table-panel">
+        <div class="panel-heading">
+          <div><span class="eyebrow">Seguimiento</span><h2>Empleados</h2></div>
+          <div class="filter-tabs" role="group" aria-label="Filtro de empleados">
+            <button class="tab active" data-filter="TODOS">Todos</button>
+            <button class="tab" data-filter="PENDIENTE">Pendientes</button>
+            <button class="tab" data-filter="FIRMADO">Firmados</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Estado</th><th>PDF</th></tr></thead>
+            <tbody id="employees-body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="side-panel">
+        <div class="qr-card">
+          <span class="eyebrow">Acceso móvil</span>
+          <h2>Comparte el formulario</h2>
+          <p class="muted">Escanea este código para abrir la página de firma.</p>
+          <img id="qr-image" src="/admin/qr" alt="Código QR para abrir el formulario">
+          <a class="button button-primary button-full" href="/admin/qr" download="qr-reglamentos-pasto.png">Descargar QR</a>
+          <code id="public-url"></code>
+        </div>
+        <div class="import-card">
+          <span class="eyebrow">Carga inicial</span>
+          <h2>Importar CSV</h2>
+          <p class="muted">Columnas esperadas: cedula, nombre, cargo, dependencia, estado.</p>
+          <form id="csv-form"><input type="file" id="csv-file" accept=".csv,text/csv" required><button class="button button-secondary button-full">Importar</button></form>
+          <div id="import-message" class="message" role="status"></div>
+        </div>
+      </aside>
+    </section>
+  </main>
+</body>
+</html>

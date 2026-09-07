@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#092f54">
+  <title>Entrega de reglamento | Centro Pasto</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@5.0.4/dist/signature_pad.umd.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</head>
+<body class="employee-page">
+  <main class="shell narrow-shell">
+    <header class="brand-header">
+      <div class="brand-mark">CP</div>
+      <div>
+        <p class="eyebrow">Centro Pasto · Gestión documental</p>
+        <h1>Entrega de reglamento</h1>
+      </div>
+    </header>
+
+    <section class="intro-panel">
+      <span class="step-badge">01 / 01</span>
+      <h2>Confirma la recepción con tu firma</h2>
+      <p>Ingresa tu cédula para consultar tus datos y firma dentro del recuadro.</p>
+    </section>
+
+    <form id="signature-form" class="form-card" novalidate>
+      <div id="message" class="message" role="alert" aria-live="polite"></div>
+      <div class="field-group">
+        <label for="cedula">Cédula</label>
+        <input id="cedula" name="cedula" inputmode="numeric" autocomplete="off" placeholder="Escribe tu número de cédula" required>
+        <small>La consulta se realiza automáticamente.</small>
+      </div>
+
+      <div class="employee-details" id="employee-details" hidden>
+        <div class="detail-row"><span>Nombre</span><strong id="nombre">-</strong></div>
+        <div class="detail-row"><span>Cargo</span><strong id="cargo">-</strong></div>
+        <div class="detail-row"><span>Dependencia</span><strong id="dependencia">-</strong></div>
+        <div class="detail-row"><span>Fecha</span><strong id="fecha"></strong></div>
+      </div>
+
+      <div class="signature-section">
+        <div class="section-heading">
+          <div><span class="eyebrow">Paso final</span><h2>Firma digital</h2></div>
+          <button type="button" id="clear-signature" class="button button-quiet">Limpiar</button>
+        </div>
+        <div class="signature-frame"><canvas id="signature-canvas" aria-label="Área para firmar"></canvas></div>
+        <p class="helper-text">Firma con el dedo o con el mouse dentro del recuadro.</p>
+      </div>
+
+      <button class="button button-primary button-full" id="submit-button" type="submit" disabled>Guardar firma</button>
+    </form>
+
+    <footer class="page-footer">Tu información se usa únicamente para registrar la entrega del reglamento.</footer>
+  </main>
+</body>
+</html>
