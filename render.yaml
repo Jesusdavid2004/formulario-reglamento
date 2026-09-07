@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: formulario-reglamento
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: QR_ACCESS_TOKEN
+        generateValue: true
