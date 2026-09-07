@@ -283,6 +283,19 @@ app.post('/admin/importar-csv', upload.single('archivo'), (req, res) => {
   }
 });
 
+app.delete('/admin/empleados/:cedula', (req, res) => {
+  const cedula = clean(req.params.cedula);
+  const employee = db.prepare('SELECT pdf_path FROM empleados WHERE cedula = ?').get(cedula);
+  if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+  db.prepare('DELETE FROM empleados WHERE cedula = ?').run(cedula);
+  if (employee.pdf_path) {
+    const pdfPath = path.resolve(ROOT, employee.pdf_path);
+    if (pdfPath.startsWith(`${PDF_DIR}${path.sep}`) && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
+  }
+  return res.json({ message: 'Registro eliminado correctamente' });
+});
+
 app.get('/admin/qr', async (req, res) => {
   const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
   const accessUrl = `${baseUrl}/?acceso=${encodeURIComponent(ACCESS_TOKEN)}`;

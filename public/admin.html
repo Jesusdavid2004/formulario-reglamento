@@ -35,9 +35,20 @@
             <button class="tab" data-filter="FIRMADO">Firmados</button>
           </div>
         </div>
+        <div class="search-panel">
+          <label class="search-field" for="employee-search">
+            <span>Buscar empleado</span>
+            <input id="employee-search" type="search" placeholder="Nombre, cédula o cargo" autocomplete="off">
+          </label>
+          <label class="search-field" for="dependency-filter">
+            <span>Dependencia</span>
+            <select id="dependency-filter"><option value="TODAS">Todas las dependencias</option></select>
+          </label>
+          <button id="clear-filters" class="button button-quiet" type="button">Limpiar filtros</button>
+        </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Estado</th><th>PDF</th></tr></thead>
+            <thead><tr><th>Cédula</th><th>Nombre</th><th>Cargo</th><th>Estado</th><th>PDF</th><th>Acción</th></tr></thead>
             <tbody id="employees-body"></tbody>
           </table>
         </div>

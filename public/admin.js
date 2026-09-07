@@ -1,5 +1,8 @@
 const body = document.querySelector('#employees-body');
 const tabs = document.querySelectorAll('.tab');
+const searchInput = document.querySelector('#employee-search');
+const dependencyFilter = document.querySelector('#dependency-filter');
+const clearFiltersButton = document.querySelector('#clear-filters');
 let employees = [];
 let activeFilter = 'TODOS';
 
@@ -8,7 +11,14 @@ function escapeHtml(value) {
 }
 
 function render() {
-  const visible = activeFilter === 'TODOS' ? employees : employees.filter((employee) => employee.estado === activeFilter);
+  const search = searchInput.value.trim().toLocaleLowerCase('es');
+  const dependency = dependencyFilter.value;
+  const visible = employees.filter((employee) => {
+    const matchesStatus = activeFilter === 'TODOS' || employee.estado === activeFilter;
+    const matchesDependency = dependency === 'TODAS' || employee.dependencia === dependency;
+    const searchable = `${employee.nombre} ${employee.cedula} ${employee.cargo}`.toLocaleLowerCase('es');
+    return matchesStatus && matchesDependency && (!search || searchable.includes(search));
+  });
   body.innerHTML = visible.map((employee) => `
     <tr>
       <td>${escapeHtml(employee.cedula)}</td>
@@ -16,7 +26,17 @@ function render() {
       <td>${escapeHtml(employee.cargo)}</td>
       <td><span class="status ${employee.estado === 'FIRMADO' ? 'status-signed' : 'status-pending'}">${escapeHtml(employee.estado)}</span></td>
       <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/${employee.pdf_path || ''}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
-    </tr>`).join('') || '<tr><td colspan="5" class="empty-state">No hay registros para este filtro.</td></tr>';
+      <td><button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="empty-state">No hay registros para este filtro.</td></tr>';
+}
+
+function updateDependencyFilter() {
+  const current = dependencyFilter.value;
+  const dependencies = [...new Set(employees.map((employee) => employee.dependencia).filter(Boolean))]
+    .sort((first, second) => first.localeCompare(second, 'es'));
+  dependencyFilter.innerHTML = '<option value="TODAS">Todas las dependencias</option>'
+    + dependencies.map((dependency) => `<option value="${escapeHtml(dependency)}">${escapeHtml(dependency)}</option>`).join('');
+  dependencyFilter.value = dependencies.includes(current) ? current : 'TODAS';
 }
 
 function updateSummary() {
@@ -30,6 +50,7 @@ function updateSummary() {
 async function loadEmployees() {
   const response = await fetch('/empleados');
   employees = await response.json();
+  updateDependencyFilter();
   updateSummary();
   render();
 }
@@ -39,6 +60,33 @@ tabs.forEach((tab) => tab.addEventListener('click', () => {
   tabs.forEach((item) => item.classList.toggle('active', item === tab));
   render();
 }));
+
+searchInput.addEventListener('input', render);
+dependencyFilter.addEventListener('change', render);
+clearFiltersButton.addEventListener('click', () => {
+  searchInput.value = '';
+  dependencyFilter.value = 'TODAS';
+  activeFilter = 'TODOS';
+  tabs.forEach((item) => item.classList.toggle('active', item.dataset.filter === 'TODOS'));
+  render();
+});
+
+body.addEventListener('click', async (event) => {
+  const button = event.target.closest('.delete-button');
+  if (!button) return;
+  const cedula = button.dataset.cedula;
+  const nombre = button.dataset.nombre;
+  if (!window.confirm(`¿Borrar definitivamente el registro de ${nombre} (${cedula})? También se eliminará su PDF.`)) return;
+  button.disabled = true;
+  const response = await fetch(`/admin/empleados/${encodeURIComponent(cedula)}`, { method: 'DELETE' });
+  const result = await response.json();
+  if (!response.ok) {
+    window.alert(result.error || 'No fue posible borrar el registro.');
+    button.disabled = false;
+    return;
+  }
+  await loadEmployees();
+});
 
 document.querySelector('#public-url').textContent = window.location.origin;
 document.querySelector('#csv-form').addEventListener('submit', async (event) => {
@@ -54,5 +102,5 @@ document.querySelector('#csv-form').addEventListener('submit', async (event) => 
 });
 
 loadEmployees().catch(() => {
-  body.innerHTML = '<tr><td colspan="5" class="empty-state">No fue posible cargar los empleados.</td></tr>';
+  body.innerHTML = '<tr><td colspan="6" class="empty-state">No fue posible cargar los empleados.</td></tr>';
 });
