@@ -269,7 +269,12 @@ app.post('/admin/firma', (req, res) => {
 
   const base64 = firma.replace(/^data:image\/png;base64,/, '');
   try {
-    fs.writeFileSync(ADMIN_SIGNATURE_FILE, Buffer.from(base64, 'base64'));
+    const image = Buffer.from(base64, 'base64');
+    if (!image.length) return res.status(400).json({ error: 'La firma recibida está vacía' });
+    fs.writeFileSync(ADMIN_SIGNATURE_FILE, image);
+    if (!fs.existsSync(ADMIN_SIGNATURE_FILE) || fs.statSync(ADMIN_SIGNATURE_FILE).size !== image.length) {
+      return res.status(500).json({ error: 'La firma no pudo guardarse en el almacenamiento del servidor' });
+    }
     return res.json({ message: 'Firma oficial guardada correctamente' });
   } catch (error) {
     console.error(error);

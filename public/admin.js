@@ -6,7 +6,46 @@ const clearFiltersButton = document.querySelector('#clear-filters');
 let employees = [];
 let activeFilter = 'TODOS';
 const adminSignatureCanvas = document.querySelector('#admin-signature-canvas');
-const adminSignaturePad = new SignaturePad(adminSignatureCanvas, { minWidth: 0.8, maxWidth: 2.4, penColor: '#092f54' });
+function createFallbackSignaturePad(canvas) {
+  const context = canvas.getContext('2d');
+  let empty = true;
+  let drawing = false;
+  const point = (event) => {
+    const bounds = canvas.getBoundingClientRect();
+    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
+  };
+  canvas.addEventListener('pointerdown', (event) => {
+    drawing = true;
+    empty = false;
+    canvas.setPointerCapture(event.pointerId);
+    const position = point(event);
+    context.beginPath();
+    context.moveTo(position.x, position.y);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    if (!drawing) return;
+    const position = point(event);
+    context.lineTo(position.x, position.y);
+    context.stroke();
+  });
+  canvas.addEventListener('pointerup', () => { drawing = false; });
+  canvas.addEventListener('pointercancel', () => { drawing = false; });
+  return {
+    isEmpty: () => empty,
+    clear: () => { context.clearRect(0, 0, canvas.width, canvas.height); empty = true; },
+    toDataURL: (type) => canvas.toDataURL(type),
+  };
+}
+const adminSignaturePad = window.SignaturePad
+  ? new window.SignaturePad(adminSignatureCanvas, { minWidth: 0.8, maxWidth: 2.4, penColor: '#092f54' })
+  : createFallbackSignaturePad(adminSignatureCanvas);
+if (!window.SignaturePad) {
+  const context = adminSignatureCanvas.getContext('2d');
+  context.strokeStyle = '#092f54';
+  context.lineWidth = 2;
+  context.lineCap = 'round';
+  context.lineJoin = 'round';
+}
 const adminSignatureStatus = document.querySelector('#admin-signature-status');
 const saveAdminSignatureButton = document.querySelector('#save-admin-signature');
 
