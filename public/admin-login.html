@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acceso administrativo | Centro Pasto</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/admin-login.js" defer></script>
+</head>
+<body>
+  <main class="shell narrow-shell">
+    <section class="form-card login-card">
+      <p class="eyebrow">Centro Pasto · Acceso protegido</p>
+      <h1>Panel administrativo</h1>
+      <p class="muted">Ingresa tus credenciales para consultar y organizar los recibos.</p>
+      <form id="admin-login-form" novalidate>
+        <div id="login-message" class="message" role="alert"></div>
+        <label for="admin-email">Correo</label>
+        <input id="admin-email" type="email" autocomplete="username" required>
+        <label for="admin-password">Contraseña</label>
+        <input id="admin-password" type="password" autocomplete="current-password" required>
+        <button class="button button-primary button-full" type="submit">Ingresar</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

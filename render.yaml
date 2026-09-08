@@ -8,3 +8,7 @@ services:
     envVars:
       - key: QR_ACCESS_TOKEN
         generateValue: true
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD_HASH
+        sync: false

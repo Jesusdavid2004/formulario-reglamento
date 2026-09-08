@@ -20,7 +20,11 @@ const PDF_DIR = path.join(ROOT, 'pdfs');
 const DB_FILE = path.join(DATA_DIR, 'reglamentos.sqlite');
 const SOURCE_DATA_FILE = path.join(ROOT, 'data.js');
 const ACCESS_TOKEN_FILE = path.join(DATA_DIR, '.qr-access-token');
-const ADMIN_SIGNATURE_FILE = path.join(DATA_DIR, 'firma-alvaro.png');
+const OFFICIAL_TEMPLATE_FILE = path.join(ROOT, 'entrega de reglamento firmado 2.docx');
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'jesusdavid.villotaa@gmail.com';
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH
+  || 'bff6d7976d27b1d029325d81278a661786a0f28857a844a562862d54f0db6738';
+const ADMIN_SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PDF_DIR, { recursive: true });
@@ -44,6 +48,7 @@ db.exec(`
     estado TEXT NOT NULL DEFAULT 'PENDIENTE',
     fecha_firma TEXT,
     firma TEXT,
+    autorizacion_datos INTEGER NOT NULL DEFAULT 0,
     pdf_path TEXT
   );
 `);
@@ -61,12 +66,18 @@ if (primaryKey?.pk === 1) {
       estado TEXT NOT NULL DEFAULT 'PENDIENTE',
       fecha_firma TEXT,
       firma TEXT,
+      autorizacion_datos INTEGER NOT NULL DEFAULT 0,
       pdf_path TEXT
     );
     INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado, fecha_firma, firma, pdf_path)
       SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, firma, pdf_path FROM empleados_legacy;
     DROP TABLE empleados_legacy;
   `);
+}
+try {
+  db.exec('ALTER TABLE empleados ADD COLUMN autorizacion_datos INTEGER NOT NULL DEFAULT 0');
+} catch (error) {
+  if (!String(error.message).includes('duplicate column name')) throw error;
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_empleados_cedula ON empleados (cedula)');
 
@@ -170,18 +181,23 @@ async function createPdf(employee, signatureDataUrl, adminSignature) {
   drawLine('Firma del trabajador:         __________________', 85, 367);
   page.drawImage(signature, { x: 230, y: 369, width: 140, height: 62 });
   drawLine(` Nombre completo:            ___________________ ${employee.nombre || ''}`, 85, 327);
-  drawLine('Quien entrega:', 85, 287);
+  drawParagraph([
+    'Acuse de recibo para validar y organizar la información del Reglamento Interno.',
+    'Asimismo, conozco que, como titular, me asisten los derechos a conocer, actualizar,',
+    'rectificar y suprimir mis datos personales, así como revocar la presente autorización.',
+  ], 285);
+  drawLine('Quien entrega:', 85, 225);
   const adminSignatureImage = await pdf.embedPng(adminSignature);
-  page.drawImage(adminSignatureImage, { x: 85, y: 216, width: 140, height: 58 });
-  drawLine('ALVARO JURADO NARVAEZ', 85, 205, 10.5, bold);
-  drawLine('Jefe División Administrativa ( E )', 85, 189, 10.5);
-  drawLine('Elaboró:     Laura Bastidas E.', 85, 145, 8.5);
+  page.drawImage(adminSignatureImage, { x: 85, y: 155, width: 140, height: 58 });
+  drawLine('ALVARO JURADO NARVAEZ', 85, 144, 10.5, bold);
+  drawLine('Jefe División Administrativa ( E )', 85, 128, 10.5);
+  drawLine('Elaboró:     Laura Bastidas E.', 85, 84, 8.5);
 
   return pdf.save();
 }
 
 async function createSignedDocx() {
-  const templatePath = path.join(ROOT, 'entrega de reglamento.docx');
+  const templatePath = OFFICIAL_TEMPLATE_FILE;
   const template = await JSZip.loadAsync(fs.readFileSync(templatePath));
   const documentEntry = template.file('word/document.xml');
   const relationshipsEntry = template.file('word/_rels/document.xml.rels');
@@ -206,7 +222,7 @@ async function createSignedDocx() {
   template.file('word/document.xml', updatedDocumentXml);
   template.file('word/_rels/document.xml.rels', updatedRelationshipsXml);
   template.file('[Content_Types].xml', updatedContentTypesXml);
-  template.file('word/media/firma-alvaro.png', fs.readFileSync(ADMIN_SIGNATURE_FILE));
+  template.file('word/media/firma-alvaro.png', await template.file('word/media/image1.png').async('nodebuffer'));
   return template.generateAsync({ type: 'nodebuffer' });
 }
 
@@ -218,6 +234,17 @@ function safeFileName(value) {
 function hasQrAccess(req) {
   const cookieToken = clean(req.headers.cookie?.match(/(?:^|;\s*)qr_access=([^;]+)/)?.[1]);
   return req.query.acceso === ACCESS_TOKEN || cookieToken === ACCESS_TOKEN;
+}
+
+function hasAdminAccess(req) {
+  const cookieToken = clean(req.headers.cookie?.match(/(?:^|;\s*)admin_access=([^;]+)/)?.[1]);
+  return cookieToken === ADMIN_SESSION_TOKEN;
+}
+
+function requireAdminAccess(req, res, next) {
+  if (hasAdminAccess(req)) return next();
+  if (req.method === 'GET' && req.path === '/admin') return res.redirect('/admin-login.html');
+  return res.status(401).json({ error: 'Debes iniciar sesión como administrador.' });
 }
 
 function requireQrAccess(req, res, next) {
@@ -247,7 +274,7 @@ app.get('/empleado/:cedula', requireQrAccess, (req, res) => {
   return res.json(employee);
 });
 
-app.get('/empleados', (req, res) => {
+app.get('/empleados', requireAdminAccess, (req, res) => {
   const status = clean(req.query.estado).toUpperCase();
   const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status)
     ? db.prepare('SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, pdf_path FROM empleados WHERE estado = ? ORDER BY nombre').all(status)
@@ -259,23 +286,24 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
   try {
     const cedula = clean(req.body.cedula);
     const firma = clean(req.body.firma);
+    const autorizacion = req.body.autorizacion === true;
     if (!cedula) return res.status(400).json({ error: 'La cedula es obligatoria' });
     if (!firma.startsWith('data:image/png;base64,')) return res.status(400).json({ error: 'La firma es obligatoria' });
+    if (!autorizacion) return res.status(400).json({ error: 'Debes leer y aceptar la autorización de datos personales.' });
 
     const employee = db.prepare('SELECT * FROM empleados WHERE cedula = ?').get(cedula);
     if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
     if (employee.estado === 'FIRMADO') return res.status(409).json({ error: 'Este empleado ya firmó el documento' });
-    if (!fs.existsSync(ADMIN_SIGNATURE_FILE)) {
-      return res.status(409).json({ error: 'El formato aún no está listo: Álvaro debe registrar primero su firma.' });
-    }
 
     const fecha = new Date().toLocaleString('es-CO', { dateStyle: 'long', timeStyle: 'short' });
     const signedEmployee = { ...employee, fecha_firma: fecha };
-    const pdfBytes = await createPdf(signedEmployee, firma, fs.readFileSync(ADMIN_SIGNATURE_FILE));
+    const officialTemplate = await JSZip.loadAsync(fs.readFileSync(OFFICIAL_TEMPLATE_FILE));
+    const adminSignature = await officialTemplate.file('word/media/image1.png').async('nodebuffer');
+    const pdfBytes = await createPdf(signedEmployee, firma, adminSignature);
     const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
     const relativePdf = path.join('pdfs', fileName);
     fs.writeFileSync(path.join(ROOT, relativePdf), pdfBytes);
-    db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, pdf_path = ? WHERE cedula = ?`)
+    db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, autorizacion_datos = 1, pdf_path = ? WHERE cedula = ?`)
       .run(fecha, firma, relativePdf, cedula);
     return res.json({ message: 'Firma guardada correctamente', pdf: `/${relativePdf.replaceAll('\\', '/')}` });
   } catch (error) {
@@ -284,16 +312,20 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
   }
 });
 
-app.get('/admin/firma', (req, res) => {
-  return res.json({ registrada: fs.existsSync(ADMIN_SIGNATURE_FILE) });
+app.post('/admin/login', (req, res) => {
+  const email = clean(req.body.email).toLowerCase();
+  const passwordHash = crypto.createHash('sha256').update(String(req.body.password ?? '')).digest('hex');
+  if (email !== ADMIN_EMAIL.toLowerCase() || passwordHash !== ADMIN_PASSWORD_HASH) {
+    return res.status(401).json({ error: 'Correo o contraseña incorrectos.' });
+  }
+  res.setHeader('Set-Cookie', `admin_access=${ADMIN_SESSION_TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800`);
+  return res.json({ message: 'Sesión iniciada' });
 });
 
-app.get('/admin/formato', async (req, res) => {
+app.get('/admin/formato', requireAdminAccess, async (req, res) => {
   try {
-    const fileName = fs.existsSync(ADMIN_SIGNATURE_FILE) ? 'entrega de reglamento firmado.docx' : 'entrega de reglamento.docx';
-    const file = fs.existsSync(ADMIN_SIGNATURE_FILE)
-      ? await createSignedDocx()
-      : fs.readFileSync(path.join(ROOT, 'entrega de reglamento.docx'));
+    const fileName = 'entrega de reglamento firmado 2.docx';
+    const file = fs.readFileSync(OFFICIAL_TEMPLATE_FILE);
     res.type('application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
     return res.send(file);
@@ -303,28 +335,7 @@ app.get('/admin/formato', async (req, res) => {
   }
 });
 
-app.post('/admin/firma', (req, res) => {
-  const firma = clean(req.body.firma);
-  if (!firma.startsWith('data:image/png;base64,')) {
-    return res.status(400).json({ error: 'La firma de Álvaro es obligatoria' });
-  }
-
-  const base64 = firma.replace(/^data:image\/png;base64,/, '');
-  try {
-    const image = Buffer.from(base64, 'base64');
-    if (!image.length) return res.status(400).json({ error: 'La firma recibida está vacía' });
-    fs.writeFileSync(ADMIN_SIGNATURE_FILE, image);
-    if (!fs.existsSync(ADMIN_SIGNATURE_FILE) || fs.statSync(ADMIN_SIGNATURE_FILE).size !== image.length) {
-      return res.status(500).json({ error: 'La firma no pudo guardarse en el almacenamiento del servidor' });
-    }
-    return res.json({ message: 'Firma oficial guardada correctamente' });
-  } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: 'No fue posible guardar la firma oficial' });
-  }
-});
-
-app.post('/admin/importar-csv', upload.single('archivo'), (req, res) => {
+app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo CSV' });
     const records = parse(req.file.buffer.toString('utf8').replace(/^\uFEFF/, ''), {
@@ -337,7 +348,7 @@ app.post('/admin/importar-csv', upload.single('archivo'), (req, res) => {
   }
 });
 
-app.delete('/admin/empleados/:cedula', (req, res) => {
+app.delete('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
   const cedula = clean(req.params.cedula);
   const employee = db.prepare('SELECT pdf_path FROM empleados WHERE cedula = ?').get(cedula);
   if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
@@ -350,7 +361,7 @@ app.delete('/admin/empleados/:cedula', (req, res) => {
   return res.json({ message: 'Registro eliminado correctamente' });
 });
 
-app.patch('/admin/empleados/:cedula', (req, res) => {
+app.patch('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
   const cedula = clean(req.params.cedula);
   const nombre = clean(req.body.nombre);
   const cargo = clean(req.body.cargo);
@@ -364,13 +375,13 @@ app.patch('/admin/empleados/:cedula', (req, res) => {
   return res.json({ message: 'Empleado actualizado correctamente' });
 });
 
-app.get('/admin/qr', async (req, res) => {
+app.get('/admin/qr', requireAdminAccess, async (req, res) => {
   const baseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
   const accessUrl = `${baseUrl}/?acceso=${encodeURIComponent(ACCESS_TOKEN)}`;
   res.type('png').send(await QRCode.toBuffer(accessUrl, { width: 720, margin: 2, color: { dark: '#092f54', light: '#ffffff' } }));
 });
 
-app.get('/admin', (req, res) => res.sendFile(path.join(ROOT, 'public', 'admin.html')));
+app.get('/admin', requireAdminAccess, (req, res) => res.sendFile(path.join(ROOT, 'public', 'admin.html')));
 app.use('/pdfs', express.static(PDF_DIR));
 
 app.listen(PORT, () => {

@@ -4,6 +4,7 @@ const details = document.querySelector('#employee-details');
 const message = document.querySelector('#message');
 const submitButton = document.querySelector('#submit-button');
 const canvas = document.querySelector('#signature-canvas');
+const consentInput = document.querySelector('#data-consent');
 const signaturePad = new SignaturePad(canvas, { minWidth: 0.8, maxWidth: 2.4, penColor: '#092f54' });
 let currentEmployee = null;
 let lookupTimer;
@@ -43,10 +44,14 @@ function showEmployee(employee) {
   document.querySelector('#cargo').textContent = employee.cargo || '-';
   document.querySelector('#dependencia').textContent = employee.dependencia || '-';
   document.querySelector('#fecha').textContent = new Intl.DateTimeFormat('es-CO', { dateStyle: 'long' }).format(new Date());
-  submitButton.disabled = employee.estado === 'FIRMADO';
+  submitButton.disabled = employee.estado === 'FIRMADO' || !consentInput.checked;
   if (employee.estado === 'FIRMADO') setMessage('Este empleado ya tiene una firma registrada.', 'warning');
   else setMessage('Datos encontrados. Ahora puedes firmar.', 'success');
 }
+
+consentInput.addEventListener('change', () => {
+  submitButton.disabled = !currentEmployee || currentEmployee.estado === 'FIRMADO' || !consentInput.checked;
+});
 
 async function lookupEmployee() {
   const cedula = cedulaInput.value.trim();
@@ -73,6 +78,7 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault();
   if (!currentEmployee) return setMessage('Primero consulta una cédula válida.', 'error');
   if (signaturePad.isEmpty()) return setMessage('Debes registrar tu firma antes de continuar.', 'error');
+  if (!consentInput.checked) return setMessage('Debes leer y aceptar la autorización de datos personales.', 'error');
 
   submitButton.disabled = true;
   submitButton.textContent = 'Guardando...';
@@ -80,11 +86,11 @@ form.addEventListener('submit', async (event) => {
     const response = await protectedFetch('/firmar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cedula: cedulaInput.value.trim(), firma: signaturePad.toDataURL('image/png') }),
+      body: JSON.stringify({ cedula: cedulaInput.value.trim(), firma: signaturePad.toDataURL('image/png'), autorizacion: true }),
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'No fue posible guardar la firma');
-    setMessage('Firma registrada correctamente. Descarga tu constancia en PDF.', 'success');
+    setMessage('Firma registrada correctamente. Descarga tu recibo en PDF.', 'success');
     const link = document.createElement('a');
     link.href = result.pdf;
     link.textContent = 'Descargar constancia PDF';

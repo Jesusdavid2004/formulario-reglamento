@@ -5,68 +5,6 @@ const dependencyFilter = document.querySelector('#dependency-filter');
 const clearFiltersButton = document.querySelector('#clear-filters');
 let employees = [];
 let activeFilter = 'TODOS';
-const adminSignatureCanvas = document.querySelector('#admin-signature-canvas');
-function createFallbackSignaturePad(canvas) {
-  const context = canvas.getContext('2d');
-  let empty = true;
-  let drawing = false;
-  const point = (event) => {
-    const bounds = canvas.getBoundingClientRect();
-    return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
-  };
-  canvas.addEventListener('pointerdown', (event) => {
-    drawing = true;
-    empty = false;
-    canvas.setPointerCapture(event.pointerId);
-    const position = point(event);
-    context.beginPath();
-    context.moveTo(position.x, position.y);
-  });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!drawing) return;
-    const position = point(event);
-    context.lineTo(position.x, position.y);
-    context.stroke();
-  });
-  canvas.addEventListener('pointerup', () => { drawing = false; });
-  canvas.addEventListener('pointercancel', () => { drawing = false; });
-  return {
-    isEmpty: () => empty,
-    clear: () => { context.clearRect(0, 0, canvas.width, canvas.height); empty = true; },
-    toDataURL: (type) => canvas.toDataURL(type),
-  };
-}
-const adminSignaturePad = window.SignaturePad
-  ? new window.SignaturePad(adminSignatureCanvas, { minWidth: 0.8, maxWidth: 2.4, penColor: '#092f54' })
-  : createFallbackSignaturePad(adminSignatureCanvas);
-if (!window.SignaturePad) {
-  const context = adminSignatureCanvas.getContext('2d');
-  context.strokeStyle = '#092f54';
-  context.lineWidth = 2;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-}
-const adminSignatureStatus = document.querySelector('#admin-signature-status');
-const saveAdminSignatureButton = document.querySelector('#save-admin-signature');
-
-function resizeAdminSignatureCanvas() {
-  const ratio = Math.max(window.devicePixelRatio || 1, 1);
-  const width = adminSignatureCanvas.offsetWidth;
-  const height = 220;
-  adminSignatureCanvas.width = width * ratio;
-  adminSignatureCanvas.height = height * ratio;
-  adminSignatureCanvas.getContext('2d').scale(ratio, ratio);
-  adminSignaturePad.clear();
-}
-
-async function loadAdminSignatureStatus() {
-  const response = await fetch('/admin/firma');
-  const result = await response.json();
-  adminSignatureStatus.textContent = result.registrada
-    ? 'Firma oficial registrada. Se usará en todos los reglamentos nuevos.'
-    : 'Falta registrar la firma oficial antes de entregar reglamentos.';
-  adminSignatureStatus.className = `message ${result.registrada ? 'success' : 'warning'}`;
-}
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[character]));
@@ -189,34 +127,6 @@ body.addEventListener('click', async (event) => {
 });
 
 document.querySelector('#public-url').textContent = window.location.origin;
-document.querySelector('#clear-admin-signature').addEventListener('click', () => adminSignaturePad.clear());
-saveAdminSignatureButton.addEventListener('click', async () => {
-  if (adminSignaturePad.isEmpty()) {
-    adminSignatureStatus.textContent = 'Dibuja la firma de Álvaro antes de guardarla.';
-    adminSignatureStatus.className = 'message error';
-    return;
-  }
-  saveAdminSignatureButton.disabled = true;
-  try {
-    const response = await fetch('/admin/firma', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ firma: adminSignaturePad.toDataURL('image/png') }),
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'No fue posible guardar la firma.');
-    adminSignatureStatus.textContent = result.message;
-    adminSignatureStatus.className = 'message success';
-    adminSignaturePad.clear();
-  } catch (error) {
-    adminSignatureStatus.textContent = error.message;
-    adminSignatureStatus.className = 'message error';
-  } finally {
-    saveAdminSignatureButton.disabled = false;
-  }
-});
-
-window.addEventListener('resize', resizeAdminSignatureCanvas);
 document.querySelector('#csv-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData();
@@ -229,11 +139,6 @@ document.querySelector('#csv-form').addEventListener('submit', async (event) => 
   if (response.ok) await loadEmployees();
 });
 
-requestAnimationFrame(resizeAdminSignatureCanvas);
-loadAdminSignatureStatus().catch(() => {
-  adminSignatureStatus.textContent = 'No fue posible consultar la firma oficial.';
-  adminSignatureStatus.className = 'message error';
-});
 loadEmployees().catch(() => {
   body.innerHTML = '<tr><td colspan="6" class="empty-state">No fue posible cargar los empleados.</td></tr>';
 });
