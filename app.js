@@ -194,8 +194,12 @@ async function createSignedDocx() {
   const imageRelationshipId = 'rIdFirmaAlvaro';
   const signatureParagraph = `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="1371600" cy="548640"/><wp:docPr id="99" name="Firma de Alvaro Jurado Narvaez"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="firma-alvaro.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${imageRelationshipId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1371600" cy="548640"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
   const afterDeliveryLabel = /(<w:p\b[^>]*>[\s\S]*?Quien entrega:[\s\S]*?<\/w:p>)/;
-  const updatedDocumentXml = documentXml.replace(afterDeliveryLabel, `$1${signatureParagraph}`);
-  if (updatedDocumentXml === documentXml) throw new Error('No se encontró el espacio de firma en el Word');
+  const documentWithNamespaces = documentXml.replace(
+    '<w:document ',
+    '<w:document xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ',
+  );
+  const updatedDocumentXml = documentWithNamespaces.replace(afterDeliveryLabel, `$1${signatureParagraph}`);
+  if (!afterDeliveryLabel.test(documentXml)) throw new Error('No se encontró el espacio de firma en el Word');
 
   const updatedRelationshipsXml = relationshipsXml.replace('</Relationships>', `<Relationship Id="${imageRelationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/firma-alvaro.png"/></Relationships>`);
   const updatedContentTypesXml = contentTypesXml.replace('</Types>', '<Default Extension="png" ContentType="image/png"/></Types>');
