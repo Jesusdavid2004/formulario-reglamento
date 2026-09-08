@@ -257,6 +257,10 @@ app.get('/admin/firma', (req, res) => {
   return res.json({ registrada: fs.existsSync(ADMIN_SIGNATURE_FILE) });
 });
 
+app.get('/admin/formato', (req, res) => {
+  return res.download(path.join(ROOT, 'entrega de reglamento.docx'), 'entrega de reglamento.docx');
+});
+
 app.post('/admin/firma', (req, res) => {
   const firma = clean(req.body.firma);
   if (!firma.startsWith('data:image/png;base64,')) {
