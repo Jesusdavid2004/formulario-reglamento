@@ -167,12 +167,18 @@ async function createPdf(employee, signatureDataUrl, adminSignature) {
   drawCentered('CENTRALES ELECTRICAS DE', 735, 11, bold);
   drawCentered('NARIÑO S.A.  E.S.P', 718, 11, bold);
   drawCentered('ACUSE DE RECIBIDO DEL REGLAMENTO INTERNO DE TRABAJO', 678, 11, bold);
-  drawLine(`Yo, ${employee.nombre || ''}`, 85, 635);
+  drawLine('Yo,', 85, 635);
   drawLine('_____________________________________________________________', 150, 617);
-  drawLine(`Identificado(a) con cédula de ciudadanía No. ${employee.cedula || ''}`, 85, 585);
+  drawLine(employee.nombre || '', 155, 620, 10.5);
+  drawLine('Identificado(a) con cédula de ciudadanía No.', 85, 585);
+  drawLine('________________', 390, 567);
+  drawLine(employee.cedula || '', 395, 570, 10.5);
   drawLine('Cargo:', 85, 553);
-  drawLine(`________________________________ ${employee.cargo || ''}`, 125, 553);
-  drawLine(`Dependencia____________________________ ${employee.dependencia || ''}`, 85, 521);
+  drawLine('________________________________', 125, 537);
+  drawLine(employee.cargo || '', 130, 540, 10.5);
+  drawLine('Dependencia', 85, 521);
+  drawLine('____________________________', 155, 505);
+  drawLine(employee.dependencia || '', 160, 508, 10.5);
   drawParagraph([`declaro que en la fecha día ${day}   mes ${month}   año ${year}  , he recibido un ejemplar`, 'físico del Reglamento Interno de Trabajo vigente, el cual contiene las normas,', 'obligaciones, derechos y procedimientos aplicables dentro de la organización.'], 480);
   drawParagraph(['Manifiesto que me comprometo a leerlo y cumplirlo en el desarrollo de mis funciones', 'laborales.'], 423);
 
@@ -180,7 +186,8 @@ async function createPdf(employee, signatureDataUrl, adminSignature) {
   const signature = await pdf.embedPng(Buffer.from(base64, 'base64'));
   drawLine('Firma del trabajador:         __________________', 85, 367);
   page.drawImage(signature, { x: 230, y: 369, width: 140, height: 62 });
-  drawLine(` Nombre completo:            ___________________ ${employee.nombre || ''}`, 85, 327);
+  drawLine(' Nombre completo:            ___________________', 85, 327);
+  drawLine(employee.nombre || '', 265, 330, 10.5);
   drawParagraph([
     'Acuse de recibo para validar y organizar la información del Reglamento Interno.',
     'Asimismo, conozco que, como titular, me asisten los derechos a conocer, actualizar,',
