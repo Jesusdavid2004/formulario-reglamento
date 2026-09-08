@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Panel de entregas | Centro Pasto</title>
   <link rel="stylesheet" href="/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/signature_pad@5.0.4/dist/signature_pad.umd.min.js" defer></script>
   <script src="/admin.js" defer></script>
 </head>
 <body>
@@ -55,6 +56,18 @@
       </div>
 
       <aside class="side-panel">
+        <div class="admin-signature-card">
+          <span class="eyebrow">Formato oficial</span>
+          <h2>Firma de quien entrega</h2>
+          <p class="muted">Ingeniero Álvaro Jurado Narváez</p>
+          <div id="admin-signature-status" class="message" role="status">Consultando estado...</div>
+          <div class="signature-frame admin-signature-frame"><canvas id="admin-signature-canvas" aria-label="Área para la firma de Álvaro Jurado Narváez"></canvas></div>
+          <p class="helper-text">Álvaro puede firmar con el dedo o con el mouse.</p>
+          <div class="signature-actions">
+            <button id="clear-admin-signature" class="button button-quiet" type="button">Limpiar</button>
+            <button id="save-admin-signature" class="button button-primary" type="button">Guardar firma oficial</button>
+          </div>
+        </div>
         <div class="qr-card">
           <span class="eyebrow">Acceso móvil</span>
           <h2>Comparte el formulario</h2>

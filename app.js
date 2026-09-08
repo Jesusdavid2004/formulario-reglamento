@@ -19,6 +19,7 @@ const PDF_DIR = path.join(ROOT, 'pdfs');
 const DB_FILE = path.join(DATA_DIR, 'reglamentos.sqlite');
 const SOURCE_DATA_FILE = path.join(ROOT, 'data.js');
 const ACCESS_TOKEN_FILE = path.join(DATA_DIR, '.qr-access-token');
+const ADMIN_SIGNATURE_FILE = path.join(DATA_DIR, 'firma-alvaro.png');
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PDF_DIR, { recursive: true });
@@ -130,7 +131,7 @@ function seedFromDataJs() {
   importEmployees(sourceEmployees());
 }
 
-async function createPdf(employee, signatureDataUrl) {
+async function createPdf(employee, signatureDataUrl, adminSignature) {
   const pdf = await PDFDocument.create();
   const page = pdf.addPage([595, 842]);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
@@ -192,6 +193,8 @@ async function createPdf(employee, signatureDataUrl) {
   page.drawImage(signature, { x: 220, y: 350, width: 140, height: 70 });
   drawField('Nombre completo:', employee.nombre, 78, 302, 360);
   page.drawText('Quien entrega:', { x: 78, y: 264, size: 11, font, color: ink });
+  const adminSignatureImage = await pdf.embedPng(adminSignature);
+  page.drawImage(adminSignatureImage, { x: 78, y: 196, width: 140, height: 58 });
   page.drawText('ALVARO JURADO NARVAEZ', { x: 78, y: 190, size: 10.5, font: bold, color: ink });
   page.drawText('Jefe División Administrativa ( E )', { x: 78, y: 174, size: 10.5, font, color: ink });
   page.drawText('Elaboró: Laura Bastidas E.', { x: 78, y: 125, size: 8.5, font, color: ink });
@@ -254,10 +257,13 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
     const employee = db.prepare('SELECT * FROM empleados WHERE cedula = ?').get(cedula);
     if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
     if (employee.estado === 'FIRMADO') return res.status(409).json({ error: 'Este empleado ya firmó el documento' });
+    if (!fs.existsSync(ADMIN_SIGNATURE_FILE)) {
+      return res.status(409).json({ error: 'El formato aún no está listo: Álvaro debe registrar primero su firma.' });
+    }
 
     const fecha = new Date().toLocaleString('es-CO', { dateStyle: 'long', timeStyle: 'short' });
     const signedEmployee = { ...employee, fecha_firma: fecha };
-    const pdfBytes = await createPdf(signedEmployee, firma);
+    const pdfBytes = await createPdf(signedEmployee, firma, fs.readFileSync(ADMIN_SIGNATURE_FILE));
     const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
     const relativePdf = path.join('pdfs', fileName);
     fs.writeFileSync(path.join(ROOT, relativePdf), pdfBytes);
@@ -267,6 +273,26 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'No fue posible guardar la firma' });
+  }
+});
+
+app.get('/admin/firma', (req, res) => {
+  return res.json({ registrada: fs.existsSync(ADMIN_SIGNATURE_FILE) });
+});
+
+app.post('/admin/firma', (req, res) => {
+  const firma = clean(req.body.firma);
+  if (!firma.startsWith('data:image/png;base64,')) {
+    return res.status(400).json({ error: 'La firma de Álvaro es obligatoria' });
+  }
+
+  const base64 = firma.replace(/^data:image\/png;base64,/, '');
+  try {
+    fs.writeFileSync(ADMIN_SIGNATURE_FILE, Buffer.from(base64, 'base64'));
+    return res.json({ message: 'Firma oficial guardada correctamente' });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'No fue posible guardar la firma oficial' });
   }
 });
 

@@ -104,6 +104,12 @@ td small { display: block; margin-top: 3px; }
 .empty-state { color: var(--muted); padding: 40px; text-align: center; }
 .side-panel { display: grid; gap: 16px; }
 .qr-card, .import-card { padding: 22px; border-radius: 16px 3px 16px 3px; }
+.admin-signature-card { padding: 22px; background: var(--white); border: 1px solid var(--line); border-radius: 16px 3px 16px 3px; box-shadow: 0 18px 45px rgba(9, 47, 84, .07); }
+.admin-signature-card h2 { margin-bottom: 8px; }
+.admin-signature-card .message { min-height: 0; margin: 14px 0 0; }
+.admin-signature-frame { height: 170px; margin-top: 12px; }
+.signature-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.signature-actions .button-primary { padding: 10px 12px; font-size: .75rem; }
 .qr-card h2, .import-card h2 { margin-bottom: 8px; }
 .qr-card p, .import-card p { font-size: .84rem; }
 #qr-image { display: block; width: 100%; max-width: 230px; margin: 18px auto; border: 8px solid var(--white); }
