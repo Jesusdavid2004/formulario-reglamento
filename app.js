@@ -133,71 +133,48 @@ function seedFromDataJs() {
 
 async function createPdf(employee, signatureDataUrl, adminSignature) {
   const pdf = await PDFDocument.create();
-  const page = pdf.addPage([595, 842]);
+  const page = pdf.addPage([612, 792]);
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const ink = rgb(0.16, 0.16, 0.16);
-  const line = rgb(0.28, 0.28, 0.28);
   const today = new Date();
   const day = String(today.getDate()).padStart(2, '0');
   const month = String(today.getMonth() + 1).padStart(2, '0');
   const year = String(today.getFullYear());
-  const drawField = (label, value, x, y, width) => {
-    page.drawText(label, { x, y, size: 11, font, color: ink });
-    const labelWidth = font.widthOfTextAtSize(label, 11);
-    page.drawLine({
-      start: { x: x + labelWidth + 7, y: y - 2 },
-      end: { x: x + width, y: y - 2 },
-      thickness: 0.7,
-      color: line,
-    });
-    page.drawText(value || '', { x: x + labelWidth + 12, y, size: 10.5, font, color: ink });
+  const drawCentered = (text, y, size, selectedFont = font) => {
+    const width = selectedFont.widthOfTextAtSize(text, size);
+    page.drawText(text, { x: (612 - width) / 2, y, size, font: selectedFont, color: ink });
+  };
+  const drawLine = (text, x, y, size = 11, selectedFont = font) => {
+    page.drawText(text, { x, y, size, font: selectedFont, color: ink });
+  };
+  const drawParagraph = (lines, y) => {
+    lines.forEach((text, index) => drawLine(text, 85, y - index * 17));
   };
 
-  page.drawText('CENTRALES ELECTRICAS DE NARIÑO S.A. E.S.P', {
-    x: 150, y: 770, size: 10.5, font: bold, color: ink,
-  });
-  page.drawText('ACUSE DE RECIBIDO DEL REGLAMENTO INTERNO DE TRABAJO', {
-    x: 74, y: 720, size: 11, font: bold, color: ink,
-  });
-
-  drawField('Yo,', employee.nombre, 78, 680, 470);
-  drawField('Identificado(a) con cédula de ciudadanía No.', employee.cedula, 78, 642, 470);
-  drawField('Cargo:', employee.cargo, 78, 604, 310);
-  drawField('Dependencia:', employee.dependencia, 78, 566, 360);
-
-  page.drawText('declaro que en la fecha día', { x: 78, y: 510, size: 11, font, color: ink });
-  page.drawLine({ start: { x: 232, y: 508 }, end: { x: 258, y: 508 }, thickness: 0.7, color: line });
-  page.drawText(day, { x: 238, y: 511, size: 10.5, font, color: ink });
-  page.drawText('mes', { x: 275, y: 510, size: 11, font, color: ink });
-  page.drawLine({ start: { x: 303, y: 508 }, end: { x: 333, y: 508 }, thickness: 0.7, color: line });
-  page.drawText(month, { x: 310, y: 511, size: 10.5, font, color: ink });
-  page.drawText('año', { x: 350, y: 510, size: 11, font, color: ink });
-  page.drawLine({ start: { x: 382, y: 508 }, end: { x: 425, y: 508 }, thickness: 0.7, color: line });
-  page.drawText(year, { x: 387, y: 511, size: 10.5, font, color: ink });
-  page.drawText(', he recibido un ejemplar físico del Reglamento Interno de Trabajo vigente, el cual contiene las normas,', {
-    x: 78, y: 484, size: 11, font, color: ink,
-  });
-  page.drawText('obligaciones, derechos y procedimientos aplicables dentro de la organización.', {
-    x: 78, y: 462, size: 11, font, color: ink,
-  });
-  page.drawText('Manifiesto que me comprometo a leerlo y cumplirlo en el desarrollo de mis funciones', {
-    x: 78, y: 420, size: 11, font, color: ink,
-  });
-  page.drawText('laborales.', { x: 78, y: 398, size: 11, font, color: ink });
+  drawCentered('CENTRALES ELECTRICAS DE', 735, 11, bold);
+  drawCentered('NARIÑO S.A.  E.S.P', 718, 11, bold);
+  drawCentered('ACUSE DE RECIBIDO DEL REGLAMENTO INTERNO DE TRABAJO', 678, 11, bold);
+  drawLine(`Yo, ${employee.nombre || ''}`, 85, 635);
+  drawLine('_____________________________________________________________', 150, 617);
+  drawLine(`Identificado(a) con cédula de ciudadanía No. ${employee.cedula || ''}`, 85, 585);
+  drawLine('Cargo:', 85, 553);
+  drawLine(`________________________________ ${employee.cargo || ''}`, 125, 553);
+  drawLine(`Dependencia____________________________ ${employee.dependencia || ''}`, 85, 521);
+  drawParagraph([`declaro que en la fecha día ${day}   mes ${month}   año ${year}  , he recibido un ejemplar`, 'físico del Reglamento Interno de Trabajo vigente, el cual contiene las normas,', 'obligaciones, derechos y procedimientos aplicables dentro de la organización.'], 480);
+  drawParagraph(['Manifiesto que me comprometo a leerlo y cumplirlo en el desarrollo de mis funciones', 'laborales.'], 423);
 
   const base64 = signatureDataUrl.replace(/^data:image\/png;base64,/, '');
   const signature = await pdf.embedPng(Buffer.from(base64, 'base64'));
-  page.drawText('Firma del trabajador:', { x: 78, y: 348, size: 11, font, color: ink });
-  page.drawLine({ start: { x: 220, y: 346 }, end: { x: 365, y: 346 }, thickness: 0.7, color: line });
-  page.drawImage(signature, { x: 220, y: 350, width: 140, height: 70 });
-  drawField('Nombre completo:', employee.nombre, 78, 302, 360);
-  page.drawText('Quien entrega:', { x: 78, y: 264, size: 11, font, color: ink });
+  drawLine('Firma del trabajador:         __________________', 85, 367);
+  page.drawImage(signature, { x: 230, y: 369, width: 140, height: 62 });
+  drawLine(` Nombre completo:            ___________________ ${employee.nombre || ''}`, 85, 327);
+  drawLine('Quien entrega:', 85, 287);
   const adminSignatureImage = await pdf.embedPng(adminSignature);
-  page.drawImage(adminSignatureImage, { x: 78, y: 196, width: 140, height: 58 });
-  page.drawText('ALVARO JURADO NARVAEZ', { x: 78, y: 190, size: 10.5, font: bold, color: ink });
-  page.drawText('Jefe División Administrativa ( E )', { x: 78, y: 174, size: 10.5, font, color: ink });
-  page.drawText('Elaboró: Laura Bastidas E.', { x: 78, y: 125, size: 8.5, font, color: ink });
+  page.drawImage(adminSignatureImage, { x: 85, y: 216, width: 140, height: 58 });
+  drawLine('ALVARO JURADO NARVAEZ', 85, 205, 10.5, bold);
+  drawLine('Jefe División Administrativa ( E )', 85, 189, 10.5);
+  drawLine('Elaboró:     Laura Bastidas E.', 85, 145, 8.5);
 
   return pdf.save();
 }
