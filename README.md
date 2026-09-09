@@ -27,4 +27,6 @@ El panel administrativo está disponible en `/admin`. El formulario de firma sol
 
 ## Persistencia
 
-La aplicación usa SQLite y guarda los PDFs localmente. El disco de un Web Service estándar de Render es efímero, por lo que para conservar firmas y documentos después de reinicios o nuevos despliegues se debe configurar un **Persistent Disk** o migrar esos datos a una base de datos y almacenamiento persistente.
+En Render, las firmas y los PDFs se guardan bajo `PERSIST_DIR`. El blueprint configura `/var/data` como **Persistent Disk**, con la base en `/var/data/data/reglamentos.sqlite` y los PDFs en `/var/data/pdfs/`. Este disco requiere un plan de Render que lo soporte; en el plan Free el servicio sigue usando almacenamiento efímero y los datos pueden perderse.
+
+Antes de desplegar, crea o conserva una copia de la base local y de la carpeta `pdfs/`. El disco persistente protege los datos desde su primer montaje, pero no recupera firmas perdidas en despliegues anteriores.

@@ -90,7 +90,7 @@ form.addEventListener('submit', async (event) => {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || 'No fue posible guardar la firma');
-    setMessage('Firma registrada correctamente. Descarga tu recibo en PDF.', 'success');
+    setMessage('Firma guardada correctamente. Descarga tu recibo en PDF.', 'success');
     const link = document.createElement('a');
     link.href = result.pdf;
     link.textContent = 'Descargar constancia PDF';

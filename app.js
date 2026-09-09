@@ -15,8 +15,9 @@ app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 3000;
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
-const PDF_DIR = path.join(ROOT, 'pdfs');
+const PERSIST_DIR = process.env.PERSIST_DIR || ROOT;
+const DATA_DIR = path.join(PERSIST_DIR, 'data');
+const PDF_DIR = path.join(PERSIST_DIR, 'pdfs');
 const DB_FILE = path.join(DATA_DIR, 'reglamentos.sqlite');
 const SOURCE_DATA_FILE = path.join(ROOT, 'data.js');
 const ACCESS_TOKEN_FILE = path.join(DATA_DIR, '.qr-access-token');
@@ -38,6 +39,7 @@ const ACCESS_TOKEN = process.env.QR_ACCESS_TOKEN || (() => {
 
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');
+db.pragma('synchronous = FULL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS empleados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -309,7 +311,7 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
     const pdfBytes = await createPdf(signedEmployee, firma, adminSignature);
     const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
     const relativePdf = path.join('pdfs', fileName);
-    fs.writeFileSync(path.join(ROOT, relativePdf), pdfBytes);
+    fs.writeFileSync(path.join(PDF_DIR, fileName), pdfBytes);
     db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, autorizacion_datos = 1, pdf_path = ? WHERE cedula = ?`)
       .run(fecha, firma, relativePdf, cedula);
     return res.json({ message: 'Firma guardada correctamente', pdf: `/${relativePdf.replaceAll('\\', '/')}` });
@@ -362,7 +364,7 @@ app.delete('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
 
   db.prepare('DELETE FROM empleados WHERE cedula = ?').run(cedula);
   if (employee.pdf_path) {
-    const pdfPath = path.resolve(ROOT, employee.pdf_path);
+    const pdfPath = path.resolve(PERSIST_DIR, employee.pdf_path);
     if (pdfPath.startsWith(`${PDF_DIR}${path.sep}`) && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
   }
   return res.json({ message: 'Registro eliminado correctamente' });
