@@ -338,7 +338,10 @@ function requireQrAccess(req, res, next) {
   return next();
 }
 
-seedFromDataJs().catch((error) => console.error('No fue posible cargar empleados:', error));
+const dataReady = seedFromDataJs().catch((error) => {
+  console.error('No fue posible cargar empleados:', error);
+  throw error;
+});
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
   if (req.path === '/' || req.path === '/index.html') return requireQrAccess(req, res, next);
@@ -347,19 +350,27 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(ROOT, 'public')));
 
 app.get('/empleado/:cedula', requireQrAccess, async (req, res) => {
+  await dataReady;
   const employee = await getEmployee(clean(req.params.cedula));
   if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
   return res.json(employee);
 });
 
 app.get('/empleados', requireAdminAccess, async (req, res) => {
-  const status = clean(req.query.estado).toUpperCase();
-  const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status) ? await getEmployees(status) : await getEmployees();
-  return res.json(employees);
+  try {
+    await dataReady;
+    const status = clean(req.query.estado).toUpperCase();
+    const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status) ? await getEmployees(status) : await getEmployees();
+    return res.json(employees);
+  } catch (error) {
+    console.error('No fue posible consultar empleados:', error);
+    return res.status(503).json({ error: 'No fue posible conectar con el almacenamiento de empleados.' });
+  }
 });
 
 app.post('/firmar', requireQrAccess, async (req, res) => {
   try {
+    await dataReady;
     const cedula = clean(req.body.cedula);
     const firma = clean(req.body.firma);
     const autorizacion = req.body.autorizacion === true;
@@ -412,6 +423,7 @@ app.get('/admin/formato', requireAdminAccess, async (req, res) => {
 
 app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), async (req, res) => {
   try {
+    await dataReady;
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo CSV' });
     const records = parse(req.file.buffer.toString('utf8').replace(/^\uFEFF/, ''), {
       columns: true, skip_empty_lines: true, bom: true, trim: true,
