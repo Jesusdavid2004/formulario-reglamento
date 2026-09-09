@@ -357,6 +357,48 @@ app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), (r
   }
 });
 
+function csvValue(value) {
+  return `"${String(value ?? '').replaceAll('"', '""')}"`;
+}
+
+app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
+  try {
+    const signedEmployees = db.prepare(`
+      SELECT cedula, nombre, cargo, dependencia, fecha_firma, pdf_path
+      FROM empleados
+      WHERE estado = 'FIRMADO'
+      ORDER BY nombre
+    `).all();
+    const archive = new JSZip();
+    const report = [['cedula', 'nombre', 'cargo', 'dependencia', 'fecha_firma', 'pdf', 'archivo_encontrado']];
+
+    for (const employee of signedEmployees) {
+      const pdfName = employee.pdf_path ? path.basename(employee.pdf_path) : '';
+      const pdfPath = employee.pdf_path ? path.resolve(PERSIST_DIR, employee.pdf_path) : '';
+      const exists = Boolean(pdfPath && pdfPath.startsWith(`${PDF_DIR}${path.sep}`) && fs.existsSync(pdfPath));
+      if (exists) archive.file(`pdfs/${pdfName}`, fs.readFileSync(pdfPath));
+      report.push([
+        employee.cedula,
+        employee.nombre,
+        employee.cargo,
+        employee.dependencia,
+        employee.fecha_firma,
+        pdfName,
+        exists ? 'SI' : 'NO',
+      ]);
+    }
+
+    archive.file('firmados.csv', `\uFEFF${report.map((row) => row.map(csvValue).join(',')).join('\r\n')}`);
+    const archiveBytes = await archive.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    res.type('application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="reglamentos-firmados.zip"');
+    return res.send(archiveBytes);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).send('No fue posible preparar el respaldo de documentos firmados.');
+  }
+});
+
 app.delete('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
   const cedula = clean(req.params.cedula);
   const employee = db.prepare('SELECT pdf_path FROM empleados WHERE cedula = ?').get(cedula);
