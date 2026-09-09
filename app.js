@@ -9,6 +9,7 @@ const { parse } = require('csv-parse/sync');
 const QRCode = require('qrcode');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const JSZip = require('jszip');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.set('trust proxy', 1);
@@ -26,6 +27,11 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'jesusdavid.villotaa@gmail.com';
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH
   || 'bff6d7976d27b1d029325d81278a661786a0f28857a844a562862d54f0db6738';
 const ADMIN_SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
+const SUPABASE_URL = clean(process.env.SUPABASE_URL);
+const SUPABASE_SERVICE_ROLE_KEY = clean(process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+  ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
+  : null;
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PDF_DIR, { recursive: true });
@@ -102,6 +108,75 @@ function normalizeEmployee(employee) {
   };
 }
 
+function assertSupabase(result) {
+  if (result.error) throw result.error;
+  return result.data;
+}
+
+async function getEmployee(cedula) {
+  if (!supabase) return db.prepare('SELECT * FROM empleados WHERE cedula = ?').get(cedula);
+  return assertSupabase(await supabase.from('empleados').select('*').eq('cedula', cedula).maybeSingle());
+}
+
+async function getEmployees(status = '') {
+  if (!supabase) {
+    return status
+      ? db.prepare('SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, pdf_path FROM empleados WHERE estado = ? ORDER BY nombre').all(status)
+      : db.prepare('SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, pdf_path FROM empleados ORDER BY nombre').all();
+  }
+  let query = supabase.from('empleados').select('cedula,nombre,cargo,dependencia,estado,fecha_firma,pdf_path').order('nombre');
+  if (status) query = query.eq('estado', status);
+  return assertSupabase(await query);
+}
+
+async function saveEmployee(employee) {
+  if (!supabase) return db.prepare('INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado) VALUES (@cedula, @nombre, @cargo, @dependencia, @estado)').run(employee);
+  return assertSupabase(await supabase.from('empleados').upsert(employee, { onConflict: 'cedula', ignoreDuplicates: false }).select().single());
+}
+
+async function seedEmployees(employees) {
+  const filtered = employees.filter(isPastoCentral).map(normalizeEmployee).filter((employee) => employee.cedula && employee.nombre);
+  if (!supabase) return importEmployees(employees);
+  for (const employee of filtered) {
+    const existing = await getEmployee(employee.cedula);
+    if (existing) {
+      assertSupabase(await supabase.from('empleados').update({ cargo: employee.cargo, dependencia: employee.dependencia }).eq('id', existing.id));
+    } else {
+      await saveEmployee(employee);
+    }
+  }
+}
+
+async function updateSignedEmployee(cedula, fecha, firma, pdfPath) {
+  if (!supabase) return db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, autorizacion_datos = 1, pdf_path = ? WHERE cedula = ?`).run(fecha, firma, pdfPath, cedula);
+  return assertSupabase(await supabase.from('empleados').update({ estado: 'FIRMADO', fecha_firma: fecha, firma, autorizacion_datos: true, pdf_path: pdfPath }).eq('cedula', cedula));
+}
+
+async function uploadPdf(pdfPath, bytes) {
+  if (!supabase) {
+    fs.writeFileSync(path.join(PDF_DIR, path.basename(pdfPath)), bytes);
+    return;
+  }
+  assertSupabase(await supabase.storage.from('reglamentos-pdfs').upload(pdfPath, bytes, { contentType: 'application/pdf', upsert: true }));
+}
+
+async function downloadPdf(pdfPath) {
+  if (!supabase) return fs.readFileSync(path.join(PDF_DIR, path.basename(pdfPath)));
+  const result = await supabase.storage.from('reglamentos-pdfs').download(pdfPath);
+  if (result.error) throw result.error;
+  return Buffer.from(await result.data.arrayBuffer());
+}
+
+async function removePdf(pdfPath) {
+  if (!pdfPath) return;
+  if (!supabase) {
+    const localPath = path.join(PDF_DIR, path.basename(pdfPath));
+    if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
+    return;
+  }
+  assertSupabase(await supabase.storage.from('reglamentos-pdfs').remove([pdfPath]));
+}
+
 function sourceEmployees() {
   if (!fs.existsSync(SOURCE_DATA_FILE)) return [];
   const source = fs.readFileSync(SOURCE_DATA_FILE, 'utf8');
@@ -142,7 +217,7 @@ function importEmployees(employees) {
 }
 
 function seedFromDataJs() {
-  importEmployees(sourceEmployees());
+  return seedEmployees(sourceEmployees());
 }
 
 async function createPdf(employee, signatureDataUrl, adminSignature) {
@@ -263,7 +338,7 @@ function requireQrAccess(req, res, next) {
   return next();
 }
 
-seedFromDataJs();
+seedFromDataJs().catch((error) => console.error('No fue posible cargar empleados:', error));
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
   if (req.path === '/' || req.path === '/index.html') return requireQrAccess(req, res, next);
@@ -271,20 +346,15 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(ROOT, 'public')));
 
-app.get('/empleado/:cedula', requireQrAccess, (req, res) => {
-  const employee = db.prepare(`
-    SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma
-    FROM empleados WHERE cedula = ?
-  `).get(clean(req.params.cedula));
+app.get('/empleado/:cedula', requireQrAccess, async (req, res) => {
+  const employee = await getEmployee(clean(req.params.cedula));
   if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
   return res.json(employee);
 });
 
-app.get('/empleados', requireAdminAccess, (req, res) => {
+app.get('/empleados', requireAdminAccess, async (req, res) => {
   const status = clean(req.query.estado).toUpperCase();
-  const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status)
-    ? db.prepare('SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, pdf_path FROM empleados WHERE estado = ? ORDER BY nombre').all(status)
-    : db.prepare('SELECT cedula, nombre, cargo, dependencia, estado, fecha_firma, pdf_path FROM empleados ORDER BY nombre').all();
+  const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status) ? await getEmployees(status) : await getEmployees();
   return res.json(employees);
 });
 
@@ -297,7 +367,7 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
     if (!firma.startsWith('data:image/png;base64,')) return res.status(400).json({ error: 'La firma es obligatoria' });
     if (!autorizacion) return res.status(400).json({ error: 'Debes leer y aceptar la autorización de datos personales.' });
 
-    const employee = db.prepare('SELECT * FROM empleados WHERE cedula = ?').get(cedula);
+    const employee = await getEmployee(cedula);
     if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
     if (employee.estado === 'FIRMADO') return res.status(409).json({ error: 'Este empleado ya firmó el documento' });
 
@@ -308,9 +378,8 @@ app.post('/firmar', requireQrAccess, async (req, res) => {
     const pdfBytes = await createPdf(signedEmployee, firma, adminSignature);
     const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
     const relativePdf = path.join('pdfs', fileName);
-    fs.writeFileSync(path.join(PDF_DIR, fileName), pdfBytes);
-    db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, autorizacion_datos = 1, pdf_path = ? WHERE cedula = ?`)
-      .run(fecha, firma, relativePdf, cedula);
+    await uploadPdf(relativePdf, pdfBytes);
+    await updateSignedEmployee(cedula, fecha, firma, relativePdf);
     return res.json({ message: 'Firma guardada correctamente', pdf: `/${relativePdf.replaceAll('\\', '/')}` });
   } catch (error) {
     console.error(error);
@@ -341,14 +410,15 @@ app.get('/admin/formato', requireAdminAccess, async (req, res) => {
   }
 });
 
-app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), (req, res) => {
+app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo CSV' });
     const records = parse(req.file.buffer.toString('utf8').replace(/^\uFEFF/, ''), {
       columns: true, skip_empty_lines: true, bom: true, trim: true,
     });
-    importEmployees(records);
-    return res.json({ message: 'CSV importado correctamente', total: db.prepare('SELECT COUNT(*) AS count FROM empleados').get().count });
+    await seedEmployees(records);
+    const total = supabase ? (await supabase.from('empleados').select('*', { count: 'exact', head: true })).count : db.prepare('SELECT COUNT(*) AS count FROM empleados').get().count;
+    return res.json({ message: 'CSV importado correctamente', total });
   } catch (error) {
     return res.status(400).json({ error: `CSV inválido: ${error.message}` });
   }
@@ -360,20 +430,22 @@ function csvValue(value) {
 
 app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
   try {
-    const signedEmployees = db.prepare(`
-      SELECT cedula, nombre, cargo, dependencia, fecha_firma, pdf_path
-      FROM empleados
-      WHERE estado = 'FIRMADO'
-      ORDER BY nombre
-    `).all();
+    const signedEmployees = await getEmployees('FIRMADO');
     const archive = new JSZip();
     const report = [['cedula', 'nombre', 'cargo', 'dependencia', 'fecha_firma', 'pdf', 'archivo_encontrado']];
 
     for (const employee of signedEmployees) {
       const pdfName = employee.pdf_path ? path.basename(employee.pdf_path) : '';
       const pdfPath = employee.pdf_path ? path.resolve(PERSIST_DIR, employee.pdf_path) : '';
-      const exists = Boolean(pdfPath && pdfPath.startsWith(`${PDF_DIR}${path.sep}`) && fs.existsSync(pdfPath));
-      if (exists) archive.file(`pdfs/${pdfName}`, fs.readFileSync(pdfPath));
+      let pdfBytes;
+      let exists = false;
+      try {
+        if (employee.pdf_path) pdfBytes = await downloadPdf(employee.pdf_path);
+        exists = Boolean(pdfBytes);
+      } catch (error) {
+        console.error(`No se pudo leer el PDF de ${employee.cedula}:`, error.message);
+      }
+      if (exists) archive.file(`pdfs/${pdfName}`, pdfBytes);
       report.push([
         employee.cedula,
         employee.nombre,
@@ -396,30 +468,28 @@ app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
   }
 });
 
-app.delete('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
+app.delete('/admin/empleados/:cedula', requireAdminAccess, async (req, res) => {
   const cedula = clean(req.params.cedula);
-  const employee = db.prepare('SELECT pdf_path FROM empleados WHERE cedula = ?').get(cedula);
+  const employee = await getEmployee(cedula);
   if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
 
-  db.prepare('DELETE FROM empleados WHERE cedula = ?').run(cedula);
-  if (employee.pdf_path) {
-    const pdfPath = path.resolve(PERSIST_DIR, employee.pdf_path);
-    if (pdfPath.startsWith(`${PDF_DIR}${path.sep}`) && fs.existsSync(pdfPath)) fs.unlinkSync(pdfPath);
-  }
+  if (supabase) assertSupabase(await supabase.from('empleados').delete().eq('cedula', cedula));
+  else db.prepare('DELETE FROM empleados WHERE cedula = ?').run(cedula);
+  await removePdf(employee.pdf_path);
   return res.json({ message: 'Registro eliminado correctamente' });
 });
 
-app.patch('/admin/empleados/:cedula', requireAdminAccess, (req, res) => {
+app.patch('/admin/empleados/:cedula', requireAdminAccess, async (req, res) => {
   const cedula = clean(req.params.cedula);
   const nombre = clean(req.body.nombre);
   const cargo = clean(req.body.cargo);
   const dependencia = clean(req.body.dependencia);
   if (!nombre || !dependencia) return res.status(400).json({ error: 'Nombre y dependencia son obligatorios' });
 
-  const result = db.prepare(`
-    UPDATE empleados SET nombre = ?, cargo = ?, dependencia = ? WHERE cedula = ?
-  `).run(nombre, cargo, dependencia, cedula);
-  if (!result.changes) return res.status(404).json({ error: 'Empleado no encontrado' });
+  const result = supabase
+    ? assertSupabase(await supabase.from('empleados').update({ nombre, cargo, dependencia }).eq('cedula', cedula).select('id'))
+    : db.prepare('UPDATE empleados SET nombre = ?, cargo = ?, dependencia = ? WHERE cedula = ?').run(nombre, cargo, dependencia, cedula);
+  if (supabase ? !result.length : !result.changes) return res.status(404).json({ error: 'Empleado no encontrado' });
   return res.json({ message: 'Empleado actualizado correctamente' });
 });
 
@@ -430,6 +500,16 @@ app.get('/admin/qr', requireAdminAccess, async (req, res) => {
 });
 
 app.get('/admin', requireAdminAccess, (req, res) => res.sendFile(path.join(ROOT, 'public', 'admin.html')));
+app.get('/admin/pdf', requireAdminAccess, async (req, res) => {
+  const pdfPath = clean(req.query.path);
+  if (!pdfPath.startsWith('pdfs/')) return res.status(400).send('Ruta inválida.');
+  try {
+    const bytes = await downloadPdf(pdfPath);
+    res.type('application/pdf').send(bytes);
+  } catch (error) {
+    return res.status(404).send('PDF no encontrado.');
+  }
+});
 app.use('/pdfs', express.static(PDF_DIR));
 
 app.listen(PORT, () => {

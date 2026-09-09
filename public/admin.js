@@ -25,7 +25,7 @@ function render() {
       <td><strong>${escapeHtml(employee.nombre)}</strong><small>${escapeHtml(employee.dependencia)}</small></td>
       <td>${escapeHtml(employee.cargo)}</td>
       <td><span class="status ${employee.estado === 'FIRMADO' ? 'status-signed' : 'status-pending'}">${escapeHtml(employee.estado)}</span></td>
-      <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/${employee.pdf_path || ''}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
+      <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/admin/pdf?path=${encodeURIComponent(employee.pdf_path || '')}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
       <td class="actions-cell">
         <button class="edit-button" type="button" data-cedula="${escapeHtml(employee.cedula)}">Editar</button>
         <button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button>
