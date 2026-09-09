@@ -338,9 +338,11 @@ function requireQrAccess(req, res, next) {
   return next();
 }
 
+let dataLoadError = null;
 const dataReady = seedFromDataJs().catch((error) => {
+  dataLoadError = error;
   console.error('No fue posible cargar empleados:', error);
-  throw error;
+  return false;
 });
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
@@ -359,6 +361,7 @@ app.get('/empleado/:cedula', requireQrAccess, async (req, res) => {
 app.get('/empleados', requireAdminAccess, async (req, res) => {
   try {
     await dataReady;
+    if (dataLoadError) return res.status(503).json({ error: 'Supabase no permite leer la tabla de empleados. Revisa los permisos de la tabla.' });
     const status = clean(req.query.estado).toUpperCase();
     const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status) ? await getEmployees(status) : await getEmployees();
     return res.json(employees);

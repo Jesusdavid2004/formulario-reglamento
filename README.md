@@ -34,3 +34,11 @@ Antes de desplegar, crea o conserva una copia de la base local y de la carpeta `
 ### Supabase
 
 Si se configuran `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY` en el entorno del servidor, la aplicación usa la tabla `public.empleados` y el bucket privado `reglamentos-pdfs` de Supabase para guardar firmas y PDFs. Sin esas variables, usa SQLite y almacenamiento local como fallback.
+
+Si Supabase muestra un error `42501` de permisos, ejecuta en SQL Editor:
+
+```sql
+grant usage on schema public to service_role;
+grant select, insert, update, delete on table public.empleados to service_role;
+grant usage, select on sequence public.empleados_id_seq to service_role;
+```
