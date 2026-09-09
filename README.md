@@ -27,7 +27,7 @@ El panel administrativo está disponible en `/admin`. El formulario de firma sol
 
 ## Persistencia
 
-En Render, las firmas y los PDFs se guardan bajo `PERSIST_DIR`. El blueprint configura `/var/data` como **Persistent Disk**, con la base en `/var/data/data/reglamentos.sqlite` y los PDFs en `/var/data/pdfs/`. Este disco requiere un plan de Render que lo soporte; en el plan Free el servicio sigue usando almacenamiento efímero y los datos pueden perderse.
+En Render, el servicio web puede permanecer en el plan Free porque las firmas y los PDFs se guardan en Supabase. SQLite y `pdfs/` solo son el fallback local cuando no se configuran las variables de Supabase.
 
 Antes de desplegar, crea o conserva una copia de la base local y de la carpeta `pdfs/`. El disco persistente protege los datos desde su primer montaje, pero no recupera firmas perdidas en despliegues anteriores.
 
