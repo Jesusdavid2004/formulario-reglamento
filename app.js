@@ -165,22 +165,19 @@ async function createPdf(employee, signatureDataUrl, adminSignature) {
   const drawParagraph = (lines, y) => {
     lines.forEach((text, index) => drawLine(text, 85, y - index * 17));
   };
-  const drawField = (label, value, labelY, lineY, lineStart, lineEnd) => {
-    if (label) drawLine(label, 85, labelY);
-    drawLine('_'.repeat(Math.max(1, Math.round((lineEnd - lineStart) / 5.2))), lineStart, lineY);
-    const valueWidth = font.widthOfTextAtSize(value || '', 10.5);
-    const valueX = lineStart + Math.max(0, (lineEnd - lineStart - valueWidth) / 2);
-    drawLine(value || '', valueX, lineY + 4, 10.5);
+  const drawInlineField = (label, value, y, valueStart, valueEnd) => {
+    drawLine(label, 85, y);
+    drawLine('_'.repeat(Math.max(1, Math.round((valueEnd - valueStart) / 5.2))), valueStart, y - 5);
+    drawLine(value || '', valueStart + 4, y, 10.5);
   };
 
   drawCentered('CENTRALES ELECTRICAS DE', 735, 11, bold);
   drawCentered('NARIÑO S.A.  E.S.P', 718, 11, bold);
   drawCentered('ACUSE DE RECIBIDO DEL REGLAMENTO INTERNO DE TRABAJO', 678, 11, bold);
-  drawField('Yo,', employee.nombre, 635, 617, 150, 535);
-  drawLine('Identificado(a) con cédula de ciudadanía No.', 85, 585);
-  drawField('', employee.cedula, 0, 567, 390, 490);
-  drawField('Cargo:', employee.cargo, 553, 537, 125, 380);
-  drawField('Dependencia', employee.dependencia, 521, 505, 155, 440);
+  drawInlineField('Yo,', employee.nombre, 635, 125, 535);
+  drawInlineField('Identificado(a) con cédula de ciudadanía No.', employee.cedula, 585, 390, 490);
+  drawInlineField('Cargo:', employee.cargo, 553, 125, 380);
+  drawInlineField('Dependencia', employee.dependencia, 521, 155, 440);
   drawParagraph([`declaro que en la fecha día ${day}   mes ${month}   año ${year}  , he recibido un ejemplar`, 'físico del Reglamento Interno de Trabajo vigente, el cual contiene las normas,', 'obligaciones, derechos y procedimientos aplicables dentro de la organización.'], 480);
   drawParagraph(['Manifiesto que me comprometo a leerlo y cumplirlo en el desarrollo de mis funciones', 'laborales.'], 423);
 
