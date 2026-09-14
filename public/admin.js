@@ -27,6 +27,7 @@ function render() {
       <td><span class="status ${employee.estado === 'FIRMADO' ? 'status-signed' : 'status-pending'}">${escapeHtml(employee.estado)}</span></td>
       <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/admin/pdf?path=${encodeURIComponent(employee.pdf_path || '')}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
       <td class="actions-cell">
+        <button class="upload-pdf-button" type="button" data-cedula="${escapeHtml(employee.cedula)}">Subir PDF</button>
         ${employee.estado !== 'FIRMADO' ? `<button class="signed-btn" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Ya firmó</button>` : ''}
         <button class="edit-button" type="button" data-cedula="${escapeHtml(employee.cedula)}">Editar</button>
         <button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button>
@@ -76,6 +77,41 @@ clearFiltersButton.addEventListener('click', () => {
 });
 
 body.addEventListener('click', async (event) => {
+  const uploadPdfButton = event.target.closest('.upload-pdf-button');
+  if (uploadPdfButton) {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.pdf,application/pdf';
+    fileInput.onchange = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('pdf', file);
+      uploadPdfButton.disabled = true;
+      uploadPdfButton.textContent = 'Subiendo...';
+      try {
+        const response = await fetch(`/admin/marcar-firmado/${encodeURIComponent(uploadPdfButton.dataset.cedula)}`, {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          window.alert(result.error || 'No fue posible subir el PDF.');
+          uploadPdfButton.disabled = false;
+          uploadPdfButton.textContent = 'Subir PDF';
+          return;
+        }
+        await loadEmployees();
+      } catch (error) {
+        window.alert('Error de conexión.');
+        uploadPdfButton.disabled = false;
+        uploadPdfButton.textContent = 'Subir PDF';
+      }
+    };
+    fileInput.click();
+    return;
+  }
+
   const editButton = event.target.closest('.edit-button');
   if (editButton) {
     const employee = employees.find((item) => item.cedula === editButton.dataset.cedula);

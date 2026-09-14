@@ -9,6 +9,7 @@ const { parse } = require('csv-parse/sync');
 const QRCode = require('qrcode');
 const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
 const JSZip = require('jszip');
+const XLSX = require('xlsx');
 const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
@@ -106,6 +107,44 @@ function normalizeEmployee(employee) {
     dependencia: clean(employee.dependencia ?? employee.area),
     estado: clean(employee.estado) || 'PENDIENTE',
   };
+}
+
+function normalizeImportRecord(record) {
+  const fields = Object.fromEntries(Object.entries(record).map(([key, value]) => [
+    clean(key).toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    value,
+  ]));
+  return {
+    cedula: fields.CEDULA,
+    nombre: fields.NOMBRE,
+    cargo: fields.CARGO,
+    dependencia: fields.DEPENDENCIA ?? fields.AREA,
+    estado: fields.ESTADO,
+  };
+}
+
+function parseImportBuffer(buffer, fileName) {
+  const extension = path.extname(fileName || '').toLowerCase();
+  if (extension === '.xlsx' || extension === '.xls') {
+    const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
+    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(firstSheet, { defval: '' }).map(normalizeImportRecord);
+  }
+
+  const text = buffer.toString('utf8').replace(/^\uFEFF/, '');
+  const firstLine = text.split(/\r?\n/, 1)[0] || '';
+  const delimiter = firstLine.includes(';') ? ';' : ',';
+  return parse(text, {
+    columns: true,
+    delimiter,
+    skip_empty_lines: true,
+    bom: true,
+    trim: true,
+  }).map(normalizeImportRecord);
+}
+
+function parseImportFile(file) {
+  return parseImportBuffer(file.buffer, file.originalname);
 }
 
 function assertSupabase(result) {
@@ -318,8 +357,13 @@ function importEmployees(employees, pdfMap = new Map()) {
   transaction(employees);
 }
 
-function seedFromDataJs() {
-  return seedEmployees(sourceEmployees());
+async function seedFromDataJs() {
+  await seedEmployees(sourceEmployees());
+  const sourceCsvFile = path.join(ROOT, 'planta_personal_termino_indefinido_y_fijo.csv');
+  if (fs.existsSync(sourceCsvFile)) {
+    const csvEmployees = parseImportBuffer(fs.readFileSync(sourceCsvFile), sourceCsvFile);
+    await seedEmployees(csvEmployees);
+  }
 }
 
 async function createPdf(employee, signatureDataUrl, adminSignature) {
@@ -530,9 +574,10 @@ app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), as
   try {
     await dataReady;
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo CSV' });
-    const records = parse(req.file.buffer.toString('utf8').replace(/^\uFEFF/, ''), {
-      columns: true, skip_empty_lines: true, bom: true, trim: true,
-    });
+    const records = parseImportFile(req.file);
+    if (!records.some((record) => clean(record.cedula) && clean(record.nombre))) {
+      return res.status(400).json({ error: 'No se encontraron trabajadores válidos en el archivo.' });
+    }
     await seedEmployees(records);
     const total = supabase ? (await supabase.from('empleados').select('*', { count: 'exact', head: true })).count : db.prepare('SELECT COUNT(*) AS count FROM empleados').get().count;
     return res.json({ message: 'CSV importado correctamente', total });
@@ -593,6 +638,9 @@ app.post('/admin/marcar-firmado/:cedula', requireAdminAccess, upload.single('pdf
 
     let relativePdf = employee.pdf_path || '';
     if (req.file && req.file.buffer) {
+      const isPdf = req.file.mimetype === 'application/pdf'
+        || path.extname(req.file.originalname || '').toLowerCase() === '.pdf';
+      if (!isPdf) return res.status(400).json({ error: 'El archivo debe ser un PDF.' });
       const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
       relativePdf = path.join('pdfs', fileName).replace(/\\/g, '/');
       await uploadPdf(relativePdf, req.file.buffer);
