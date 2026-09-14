@@ -27,6 +27,7 @@ function render() {
       <td><span class="status ${employee.estado === 'FIRMADO' ? 'status-signed' : 'status-pending'}">${escapeHtml(employee.estado)}</span></td>
       <td>${employee.estado === 'FIRMADO' ? `<a class="pdf-link" href="/admin/pdf?path=${encodeURIComponent(employee.pdf_path || '')}" target="_blank">Ver PDF</a>` : '<span class="muted">-</span>'}</td>
       <td class="actions-cell">
+        ${employee.estado !== 'FIRMADO' ? `<button class="signed-btn" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Ya firmó</button>` : ''}
         <button class="edit-button" type="button" data-cedula="${escapeHtml(employee.cedula)}">Editar</button>
         <button class="delete-button" type="button" data-cedula="${escapeHtml(employee.cedula)}" data-nombre="${escapeHtml(employee.nombre)}">Borrar</button>
       </td>
@@ -110,6 +111,69 @@ body.addEventListener('click', async (event) => {
     return;
   }
 
+  const signedBtn = event.target.closest('.signed-btn');
+  if (signedBtn) {
+    const cedula = signedBtn.dataset.cedula;
+    const nombre = signedBtn.dataset.nombre;
+    const confirmSign = window.confirm(`¿Marcar a ${nombre} (${cedula}) como "FIRMADO"?\n\nPuedes subir el PDF firmado si lo tienes a mano, o marcarlo directamente.`);
+    if (!confirmSign) return;
+
+    // Check if user wants to upload a PDF file
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.pdf,application/pdf';
+    
+    fileInput.onchange = async () => {
+      const formData = new FormData();
+      if (fileInput.files && fileInput.files[0]) {
+        formData.append('pdf', fileInput.files[0]);
+      }
+      signedBtn.disabled = true;
+      signedBtn.textContent = 'Guardando...';
+      try {
+        const response = await fetch(`/admin/marcar-firmado/${encodeURIComponent(cedula)}`, {
+          method: 'POST',
+          body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          window.alert(result.error || 'No fue posible marcar como firmado.');
+          signedBtn.disabled = false;
+          signedBtn.textContent = 'Ya firmó';
+          return;
+        }
+        await loadEmployees();
+      } catch (err) {
+        window.alert('Error de conexión.');
+        signedBtn.disabled = false;
+        signedBtn.textContent = 'Ya firmó';
+      }
+    };
+
+    // If cancelled file chooser, still ask if mark without file
+    fileInput.oncancel = async () => {
+      signedBtn.disabled = true;
+      try {
+        const response = await fetch(`/admin/marcar-firmado/${encodeURIComponent(cedula)}`, {
+          method: 'POST',
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          window.alert(result.error || 'No fue posible marcar como firmado.');
+          signedBtn.disabled = false;
+          return;
+        }
+        await loadEmployees();
+      } catch (err) {
+        window.alert('Error de conexión.');
+        signedBtn.disabled = false;
+      }
+    };
+
+    fileInput.click();
+    return;
+  }
+
   const button = event.target.closest('.delete-button');
   if (!button) return;
   const cedula = button.dataset.cedula;
@@ -127,6 +191,37 @@ body.addEventListener('click', async (event) => {
 });
 
 document.querySelector('#public-url').textContent = window.location.origin;
+
+const createEmpForm = document.querySelector('#create-emp-form');
+if (createEmpForm) {
+  createEmpForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const cedula = document.querySelector('#new-cedula').value.trim();
+    const nombre = document.querySelector('#new-nombre').value.trim();
+    const cargo = document.querySelector('#new-cargo').value.trim();
+    const dependencia = document.querySelector('#new-dependencia').value.trim();
+    const output = document.querySelector('#create-emp-message');
+
+    try {
+      const response = await fetch('/admin/crear-empleado', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cedula, nombre, cargo, dependencia }),
+      });
+      const result = await response.json();
+      output.textContent = result.message || result.error;
+      output.className = `message ${response.ok ? 'success' : 'error'}`;
+      if (response.ok) {
+        createEmpForm.reset();
+        await loadEmployees();
+      }
+    } catch (err) {
+      output.textContent = 'Error de conexión con el servidor.';
+      output.className = 'message error';
+    }
+  });
+}
+
 document.querySelector('#csv-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const formData = new FormData();

@@ -134,19 +134,6 @@ async function saveEmployee(employee) {
   return assertSupabase(await supabase.from('empleados').upsert(employee, { onConflict: 'cedula', ignoreDuplicates: false }).select().single());
 }
 
-async function seedEmployees(employees) {
-  const filtered = employees.filter(isPastoCentral).map(normalizeEmployee).filter((employee) => employee.cedula && employee.nombre);
-  if (!supabase) return importEmployees(employees);
-  for (const employee of filtered) {
-    const existing = await getEmployee(employee.cedula);
-    if (existing) {
-      assertSupabase(await supabase.from('empleados').update({ cargo: employee.cargo, dependencia: employee.dependencia }).eq('id', existing.id));
-    } else {
-      await saveEmployee(employee);
-    }
-  }
-}
-
 async function updateSignedEmployee(cedula, fecha, firma, pdfPath) {
   if (!supabase) return db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = ?, firma = ?, autorizacion_datos = 1, pdf_path = ? WHERE cedula = ?`).run(fecha, firma, pdfPath, cedula);
   return assertSupabase(await supabase.from('empleados').update({ estado: 'FIRMADO', fecha_firma: fecha, firma, autorizacion_datos: true, pdf_path: pdfPath }).eq('cedula', cedula));
@@ -187,33 +174,148 @@ function sourceEmployees() {
   return Array.isArray(context.__employeesData) ? context.__employeesData : [];
 }
 
-function isPastoCentral(employee) {
-  const dependency = clean(employee.dependencia).toUpperCase();
-  const zone = clean(employee.zonaNombre).toUpperCase();
-  return dependency.includes('PASTO ZONA CENTRAL')
-    || zone === 'PASTO (ZONA 001)'
-    || zone === 'PASTO ZONA CENTRAL';
+const MANUAL_PDF_MAPPINGS = {
+  'Diana sinister.pdf': '1087128951',
+  'Fabio Enrique.pdf': '10546314',
+  'Franklin Quiñónes.pdf': '98428203',
+  'Jaime Rosero.pdf': '12919399',
+  'Jaon Ivoin.pdf': '12919399',
+  'Santiago Molinenos.pdf': '12916615',
+  'Segundo Obiedo.pdf': '98427879',
+  'Segundo herney .pdf': '98427879',
+  'Marcela Pérez .pdf': '36952144',
+  'Paola Sandoval.pdf': '36755487',
+  'Elsa Paola Zambrano .pdf': '59677129',
+  'Benítez Angulo.pdf': '12911689',
+  'Alicia Gonzales.pdf': '59671131',
+  'Ginna Estefanía chamorro.pdf': '1128279375',
+  'Francisco Leonardo Valencia.pdf': '87943538',
+  'Brayan guisamano Dajome.pdf': '98429682',
+  'Daiwer servillo Araujo.pdf': '87942121',
+  'Darío segura.pdf': '12917785',
+  'Eliana Jimena Portilla.pdf': '1086107154',
+  'Elmer giovanni dajone.pdf': '98429682',
+  'Flavio Jhonny castillo.pdf': '12918861',
+  'Hamerley Medina.pdf': '1107072467',
+  'Harold Antonio Salcedo.pdf': '12914997',
+  'Heider castillo.pdf': '87942491',
+  'Javier Molina.pdf': '12911930',
+  'Jimena Gaviria Mesa.pdf': '38643369',
+  'Jorge Andrés Cifuentes Marquez.pdf': '1087778081',
+  'Julio César Díaz Benavides .pdf': '98429180',
+  'Lobeth carolina cumbal .pdf': '1004539268',
+  'Manuel alexander coaji Muñoz .pdf': '87070249',
+  'Mario walter siluz.pdf': '12919192',
+  'Oscar Armando Benitez.pdf': '12911689',
+  'Pacho angulo.pdf': '87943538',
+  'Pedro Manuel Ruiz.pdf': '16628398',
+  'Sandra Liliana López.pdf': '1085262261',
+  'Leder Andrés Quiñones.pdf': '94439253'
+};
+
+function normalizeTextMatch(s) {
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function importEmployees(employees) {
-  const find = db.prepare('SELECT id FROM empleados WHERE cedula = ? AND nombre = ?');
-  const update = db.prepare('UPDATE empleados SET cargo = ?, dependencia = ? WHERE id = ?');
-  const insert = db.prepare('INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado) VALUES (@cedula, @nombre, @cargo, @dependencia, @estado)');
+function getLocalPdfMappings(allEmployees) {
+  const map = new Map();
+  if (!fs.existsSync(PDF_DIR)) return map;
+  const pdfFiles = fs.readdirSync(PDF_DIR).filter((f) => f.toLowerCase().endsWith('.pdf'));
+
+  pdfFiles.forEach((pdf) => {
+    if (MANUAL_PDF_MAPPINGS[pdf]) {
+      map.set(MANUAL_PDF_MAPPINGS[pdf], path.join('pdfs', pdf).replace(/\\/g, '/'));
+      return;
+    }
+    const m = pdf.match(/^(\d+)_/);
+    if (m) {
+      map.set(m[1], path.join('pdfs', pdf).replace(/\\/g, '/'));
+      return;
+    }
+    const pdfName = normalizeTextMatch(path.parse(pdf).name);
+    const words = pdfName.split(' ').filter((w) => w.length > 2);
+    let best = null;
+    let bestScore = 0;
+    allEmployees.forEach((e) => {
+      if (!e.cedula) return;
+      const eNorm = normalizeTextMatch(e.nombre);
+      if (eNorm.includes(pdfName)) {
+        best = e;
+        bestScore = 1.0;
+        return;
+      }
+      const matches = words.filter((w) => eNorm.includes(w));
+      const score = matches.length / Math.max(words.length, 1);
+      if (score > bestScore && (matches.length >= 2 || (words.length === 1 && matches.length === 1))) {
+        bestScore = score;
+        best = e;
+      }
+    });
+    if (best && bestScore >= 0.5) {
+      map.set(String(best.cedula).trim(), path.join('pdfs', pdf).replace(/\\/g, '/'));
+    }
+  });
+  return map;
+}
+
+async function seedEmployees(employees) {
+  const filtered = employees.map(normalizeEmployee).filter((employee) => employee.cedula && employee.nombre && !employee.cedula.startsWith('VACANTE-'));
+  const pdfMap = getLocalPdfMappings(filtered);
+
+  if (!supabase) return importEmployees(employees, pdfMap);
+  for (const employee of filtered) {
+    const existing = await getEmployee(employee.cedula);
+    const mappedPdf = pdfMap.get(employee.cedula);
+    if (existing) {
+      const updates = { cargo: employee.cargo, dependencia: employee.dependencia };
+      if (existing.estado !== 'FIRMADO' && mappedPdf) {
+        updates.estado = 'FIRMADO';
+        updates.pdf_path = mappedPdf;
+        updates.fecha_firma = existing.fecha_firma || 'FIRMADO PREVIO';
+      }
+      assertSupabase(await supabase.from('empleados').update(updates).eq('id', existing.id));
+    } else {
+      const newEmp = { ...employee };
+      if (mappedPdf) {
+        newEmp.estado = 'FIRMADO';
+        newEmp.pdf_path = mappedPdf;
+        newEmp.fecha_firma = 'FIRMADO PREVIO';
+      }
+      await saveEmployee(newEmp);
+    }
+  }
+}
+
+function importEmployees(employees, pdfMap = new Map()) {
+  const find = db.prepare('SELECT id, estado, fecha_firma, pdf_path FROM empleados WHERE cedula = ?');
+  const updateInfo = db.prepare('UPDATE empleados SET cargo = ?, dependencia = ? WHERE id = ?');
+  const updateSigned = db.prepare('UPDATE empleados SET cargo = ?, dependencia = ?, estado = ?, pdf_path = ?, fecha_firma = COALESCE(fecha_firma, ?) WHERE id = ?');
+  const insert = db.prepare('INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado, pdf_path, fecha_firma) VALUES (@cedula, @nombre, @cargo, @dependencia, @estado, @pdf_path, @fecha_firma)');
   const transaction = db.transaction((items) => {
     for (const employee of items) {
       const normalized = normalizeEmployee(employee);
-      if (normalized.cedula && normalized.nombre) insert.run(normalized);
+      if (!normalized.cedula || !normalized.nombre || normalized.cedula.startsWith('VACANTE-')) continue;
+      const existing = find.get(normalized.cedula);
+      const mappedPdf = pdfMap.get(normalized.cedula);
+
+      if (existing) {
+        if (existing.estado !== 'FIRMADO' && mappedPdf) {
+          updateSigned.run(normalized.cargo, normalized.dependencia, 'FIRMADO', mappedPdf, 'FIRMADO PREVIO', existing.id);
+        } else {
+          updateInfo.run(normalized.cargo, normalized.dependencia, existing.id);
+        }
+      } else {
+        const toInsert = {
+          ...normalized,
+          pdf_path: mappedPdf || null,
+          estado: mappedPdf ? 'FIRMADO' : (normalized.estado || 'PENDIENTE'),
+          fecha_firma: mappedPdf ? 'FIRMADO PREVIO' : null,
+        };
+        insert.run(toInsert);
+      }
     }
   });
-  transaction(employees.filter(isPastoCentral).filter((employee) => {
-    const normalized = normalizeEmployee(employee);
-    const existing = find.get(normalized.cedula, normalized.nombre);
-    if (existing) {
-      update.run(normalized.cargo, normalized.dependencia, existing.id);
-      return false;
-    }
-    return true;
-  }));
+  transaction(employees);
 }
 
 function seedFromDataJs() {
@@ -480,6 +582,64 @@ app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).send('No fue posible preparar el respaldo de documentos firmados.');
+  }
+});
+
+app.post('/admin/marcar-firmado/:cedula', requireAdminAccess, upload.single('pdf'), async (req, res) => {
+  try {
+    const cedula = clean(req.params.cedula);
+    const employee = await getEmployee(cedula);
+    if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+
+    let relativePdf = employee.pdf_path || '';
+    if (req.file && req.file.buffer) {
+      const fileName = `${safeFileName(employee.cedula)}_${safeFileName(employee.nombre)}.pdf`;
+      relativePdf = path.join('pdfs', fileName).replace(/\\/g, '/');
+      await uploadPdf(relativePdf, req.file.buffer);
+    }
+
+    const fecha = new Date().toLocaleString('es-CO', { dateStyle: 'long', timeStyle: 'short' });
+    if (!supabase) {
+      db.prepare(`UPDATE empleados SET estado = 'FIRMADO', fecha_firma = COALESCE(fecha_firma, ?), pdf_path = COALESCE(?, pdf_path) WHERE cedula = ?`).run(fecha, relativePdf || null, cedula);
+    } else {
+      assertSupabase(await supabase.from('empleados').update({
+        estado: 'FIRMADO',
+        fecha_firma: employee.fecha_firma || fecha,
+        pdf_path: relativePdf || employee.pdf_path || null,
+      }).eq('cedula', cedula));
+    }
+    return res.json({ message: 'Empleado marcado como firmado correctamente', pdf_path: relativePdf });
+  } catch (error) {
+    console.error('Error al marcar como firmado:', error);
+    return res.status(500).json({ error: 'No fue posible marcar como firmado el empleado.' });
+  }
+});
+
+app.post('/admin/crear-empleado', requireAdminAccess, async (req, res) => {
+  try {
+    const cedula = clean(req.body.cedula);
+    const nombre = clean(req.body.nombre);
+    const cargo = clean(req.body.cargo);
+    const dependencia = clean(req.body.dependencia);
+    if (!cedula || !nombre || !dependencia) {
+      return res.status(400).json({ error: 'Cédula, nombre y dependencia son obligatorios.' });
+    }
+    const existing = await getEmployee(cedula);
+    if (existing) {
+      return res.status(409).json({ error: 'Ya existe un empleado con esa cédula.' });
+    }
+    const newEmp = {
+      cedula,
+      nombre,
+      cargo,
+      dependencia,
+      estado: 'PENDIENTE',
+    };
+    await saveEmployee(newEmp);
+    return res.json({ message: 'Empleado agregado correctamente' });
+  } catch (error) {
+    console.error('Error al crear empleado:', error);
+    return res.status(500).json({ error: 'No fue posible crear el empleado.' });
   }
 });
 

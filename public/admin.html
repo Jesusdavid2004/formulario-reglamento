@@ -65,6 +65,19 @@
           <code id="public-url"></code>
         </div>
         <div class="import-card">
+          <span class="eyebrow">Gestión</span>
+          <h2>Agregar Empleado</h2>
+          <p class="muted">Si un empleado no está en la lista, agrégalo manualmente.</p>
+          <form id="create-emp-form" class="new-emp-form">
+            <input type="text" id="new-cedula" placeholder="Cédula" required>
+            <input type="text" id="new-nombre" placeholder="Nombre completo" required>
+            <input type="text" id="new-cargo" placeholder="Cargo">
+            <input type="text" id="new-dependencia" placeholder="Dependencia / Área" required>
+            <button type="submit" class="button button-primary button-full">Guardar empleado</button>
+          </form>
+          <div id="create-emp-message" class="message" role="status"></div>
+        </div>
+        <div class="import-card">
           <span class="eyebrow">Carga inicial</span>
           <h2>Importar CSV</h2>
           <p class="muted">Columnas esperadas: cedula, nombre, cargo, dependencia, estado.</p>
