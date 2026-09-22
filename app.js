@@ -187,10 +187,21 @@ async function uploadPdf(pdfPath, bytes) {
 }
 
 async function downloadPdf(pdfPath) {
-  if (!supabase) return fs.readFileSync(path.join(PDF_DIR, path.basename(pdfPath)));
-  const result = await supabase.storage.from('reglamentos-pdfs').download(pdfPath);
-  if (result.error) throw result.error;
-  return Buffer.from(await result.data.arrayBuffer());
+  if (supabase) {
+    try {
+      const result = await supabase.storage.from('reglamentos-pdfs').download(pdfPath);
+      if (!result.error && result.data) {
+        return Buffer.from(await result.data.arrayBuffer());
+      }
+    } catch (err) {
+      console.warn(`No se pudo descargar de Supabase Storage (${pdfPath}):`, err.message);
+    }
+  }
+  const localFile = path.join(PDF_DIR, path.basename(pdfPath));
+  if (fs.existsSync(localFile)) {
+    return fs.readFileSync(localFile);
+  }
+  throw new Error(`PDF no encontrado: ${pdfPath}`);
 }
 
 async function removePdf(pdfPath) {
@@ -357,6 +368,96 @@ function importEmployees(employees, pdfMap = new Map()) {
   transaction(employees);
 }
 
+async function syncAllPdfs() {
+  if (!fs.existsSync(PDF_DIR)) return;
+  const pdfFiles = fs.readdirSync(PDF_DIR).filter((f) => f.toLowerCase().endsWith('.pdf'));
+
+  console.log(`Iniciando sincronización de ${pdfFiles.length} PDFs...`);
+
+  for (const file of pdfFiles) {
+    const relativePath = path.join('pdfs', file).replace(/\\/g, '/');
+    let cedula = '';
+    let nombre = '';
+
+    const m = file.match(/^(\d+)_(.*)\.pdf$/i);
+    if (m) {
+      cedula = m[1];
+      nombre = m[2].replace(/_/g, ' ').trim();
+    } else if (MANUAL_PDF_MAPPINGS[file]) {
+      cedula = MANUAL_PDF_MAPPINGS[file];
+      nombre = path.parse(file).name.replace(/_/g, ' ').trim();
+    }
+
+    if (!cedula) continue;
+
+    const existing = await getEmployee(cedula);
+
+    if (existing) {
+      const shouldUpdate = existing.estado !== 'FIRMADO' || !existing.pdf_path;
+      if (shouldUpdate) {
+        const fecha = existing.fecha_firma || 'FIRMADO PREVIO';
+        if (supabase) {
+          await supabase.from('empleados').update({
+            estado: 'FIRMADO',
+            fecha_firma: fecha,
+            pdf_path: relativePath,
+            autorizacion_datos: true,
+          }).eq('id', existing.id);
+        } else {
+          db.prepare(`
+            UPDATE empleados
+            SET estado = 'FIRMADO',
+                fecha_firma = COALESCE(fecha_firma, ?),
+                pdf_path = ?,
+                autorizacion_datos = 1
+            WHERE id = ?
+          `).run(fecha, relativePath, existing.id);
+        }
+      }
+    } else {
+      const newEmp = {
+        cedula,
+        nombre: nombre || 'EMPLEADO CEDENAR',
+        cargo: 'EMPLEADO',
+        dependencia: 'CEDENAR',
+        estado: 'FIRMADO',
+        fecha_firma: 'FIRMADO PREVIO',
+        autorizacion_datos: 1,
+        pdf_path: relativePath,
+      };
+      if (supabase) {
+        await supabase.from('empleados').insert({
+          cedula: newEmp.cedula,
+          nombre: newEmp.nombre,
+          cargo: newEmp.cargo,
+          dependencia: newEmp.dependencia,
+          estado: newEmp.estado,
+          fecha_firma: newEmp.fecha_firma,
+          autorizacion_datos: true,
+          pdf_path: newEmp.pdf_path,
+        });
+      } else {
+        db.prepare(`
+          INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado, fecha_firma, autorizacion_datos, pdf_path)
+          VALUES (@cedula, @nombre, @cargo, @dependencia, @estado, @fecha_firma, @autorizacion_datos, @pdf_path)
+        `).run(newEmp);
+      }
+    }
+
+    if (supabase) {
+      try {
+        const fullLocalPath = path.join(PDF_DIR, file);
+        const bytes = fs.readFileSync(fullLocalPath);
+        await uploadPdf(relativePath, bytes);
+      } catch (err) {
+        console.warn(`Aviso al subir PDF a Supabase (${file}):`, err.message);
+      }
+    }
+  }
+
+  console.log('Sincronización de PDFs completada con éxito.');
+}
+
 async function seedFromDataJs() {
   await seedEmployees(sourceEmployees());
   const sourceCsvFile = path.join(ROOT, 'planta_personal_termino_indefinido_y_fijo.csv');
@@ -364,6 +465,7 @@ async function seedFromDataJs() {
     const csvEmployees = parseImportBuffer(fs.readFileSync(sourceCsvFile), sourceCsvFile);
     await seedEmployees(csvEmployees);
   }
+  await syncAllPdfs();
 }
 
 async function createPdf(employee, signatureDataUrl, adminSignature) {
