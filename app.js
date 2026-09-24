@@ -732,6 +732,152 @@ app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
   }
 });
 
+app.get('/admin/reporte-excel', requireAdminAccess, async (req, res) => {
+  try {
+    await dataReady;
+    const signedEmployees = await getEmployees('FIRMADO');
+
+    const getZoneName = (dependencia) => {
+      if (!dependencia) return 'SIN ZONA';
+      const parts = dependencia.split(' - ');
+      return parts[0].trim();
+    };
+
+    const rows = signedEmployees
+      .map((emp) => ({
+        Cedula: emp.cedula,
+        Nombre: emp.nombre,
+        Cargo: emp.cargo,
+        Dependencia: emp.dependencia,
+        Zona: getZoneName(emp.dependencia),
+        Fecha_Firma: emp.fecha_firma || '',
+      }))
+      .sort((a, b) => {
+        const zoneCmp = a.Zona.localeCompare(b.Zona, 'es');
+        if (zoneCmp !== 0) return zoneCmp;
+        return a.Nombre.localeCompare(b.Nombre, 'es');
+      });
+
+    const workbook = XLSX.utils.book_new();
+
+    const headerStyle = {
+      font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 12 },
+      fill: { fgColor: { rgb: '092F54' } },
+      alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+      border: {
+        top: { style: 'thin', color: { rgb: '000000' } },
+        bottom: { style: 'thin', color: { rgb: '000000' } },
+        left: { style: 'thin', color: { rgb: '000000' } },
+        right: { style: 'thin', color: { rgb: '000000' } },
+      },
+    };
+
+    const dataStyle = {
+      font: { sz: 10 },
+      alignment: { vertical: 'center', wrapText: true },
+      border: {
+        top: { style: 'thin', color: { rgb: 'CCCCCC' } },
+        bottom: { style: 'thin', color: { rgb: 'CCCCCC' } },
+        left: { style: 'thin', color: { rgb: 'CCCCCC' } },
+        right: { style: 'thin', color: { rgb: 'CCCCCC' } },
+      },
+    };
+
+    const worksheet = XLSX.utils.json_to_sheet(rows, {
+      header: ['Cedula', 'Nombre', 'Cargo', 'Dependencia', 'Zona', 'Fecha_Firma'],
+    });
+
+    worksheet['!cols'] = [
+      { wch: 16 },
+      { wch: 40 },
+      { wch: 30 },
+      { wch: 45 },
+      { wch: 30 },
+      { wch: 28 },
+    ];
+
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: range.s.r, c: col });
+      if (worksheet[cellRef]) worksheet[cellRef].s = headerStyle;
+    }
+    for (let row = range.s.r + 1; row <= range.e.r; row++) {
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
+        if (worksheet[cellRef]) worksheet[cellRef].s = dataStyle;
+      }
+    }
+
+    worksheet['!rows'] = [{ hpt: 30 }];
+
+    const displayName = {
+      Cedula: 'Cedula',
+      Nombre: 'Nombre Completo',
+      Cargo: 'Cargo',
+      Dependencia: 'Dependencia / Area',
+      Zona: 'Zona',
+      Fecha_Firma: 'Fecha de Firma',
+    };
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: range.s.r, c: col });
+      if (worksheet[cellRef]) {
+        const originalValue = worksheet[cellRef].v;
+        worksheet[cellRef].v = displayName[originalValue] || originalValue;
+      }
+    }
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Firmados');
+
+    const zoneSummary = {};
+    rows.forEach((row) => {
+      if (!zoneSummary[row.Zona]) zoneSummary[row.Zona] = { firmados: 0 };
+      zoneSummary[row.Zona].firmados++;
+    });
+    const summaryRows = Object.entries(zoneSummary)
+      .map(([zona, data]) => ({
+        Zona: zona,
+        Firmados: data.firmados,
+      }))
+      .sort((a, b) => a.Zona.localeCompare(b.Zona, 'es'));
+
+    const summarySheet = XLSX.utils.json_to_sheet(summaryRows, {
+      header: ['Zona', 'Firmados'],
+    });
+    summarySheet['!cols'] = [{ wch: 40 }, { wch: 14 }];
+    const summaryRange = XLSX.utils.decode_range(summarySheet['!ref']);
+    for (let col = summaryRange.s.c; col <= summaryRange.e.c; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: summaryRange.s.r, c: col });
+      if (summarySheet[cellRef]) summarySheet[cellRef].s = headerStyle;
+    }
+    for (let row = summaryRange.s.r + 1; row <= summaryRange.e.r; row++) {
+      for (let col = summaryRange.s.c; col <= summaryRange.e.c; col++) {
+        const cellRef = XLSX.utils.encode_cell({ r: row, c: col });
+        if (summarySheet[cellRef]) summarySheet[cellRef].s = dataStyle;
+      }
+    }
+    summarySheet['!rows'] = [{ hpt: 30 }];
+    const summaryDisplayName = { Zona: 'Zona', Firmados: 'Total Firmados' };
+    for (let col = summaryRange.s.c; col <= summaryRange.e.c; col++) {
+      const cellRef = XLSX.utils.encode_cell({ r: summaryRange.s.r, c: col });
+      if (summarySheet[cellRef]) {
+        const originalValue = summarySheet[cellRef].v;
+        summarySheet[cellRef].v = summaryDisplayName[originalValue] || originalValue;
+      }
+    }
+
+    XLSX.utils.book_append_sheet(workbook, summarySheet, 'Resumen por Zona');
+
+    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const fileName = `reporte-firmados-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    return res.send(excelBuffer);
+  } catch (error) {
+    console.error('Error al generar reporte Excel:', error);
+    return res.status(500).send('No fue posible generar el reporte Excel.');
+  }
+});
+
 app.post('/admin/marcar-firmado/:cedula', requireAdminAccess, upload.single('pdf'), async (req, res) => {
   try {
     const cedula = clean(req.params.cedula);

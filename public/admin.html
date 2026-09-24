@@ -5,31 +5,57 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Panel de entregas | Centro Pasto</title>
   <link rel="stylesheet" href="/styles.css">
-  <script src="https://cdn.jsdelivr.net/npm/signature_pad@5.0.4/dist/signature_pad.umd.min.js" defer></script>
   <script src="/admin.js" defer></script>
 </head>
 <body>
   <main class="shell admin-shell">
     <header class="admin-header">
       <div>
-        <p class="eyebrow">Centro Pasto · Control administrativo</p>
-        <h1>Entrega de reglamentos</h1>
-        <p class="muted">Monitorea el avance y comparte el acceso con el equipo.</p>
+        <p class="eyebrow">CEDENAR · Control administrativo</p>
+        <h1>Entrega de Reglamentos</h1>
+        <p class="muted">Monitorea el avance por zona y comparte el acceso con el equipo.</p>
       </div>
       <span class="button button-secondary">El formulario se abre solo con QR</span>
     </header>
 
-    <section class="summary-grid" aria-label="Resumen">
-      <div class="summary-card"><span>Total</span><strong id="total-count">0</strong></div>
-      <div class="summary-card pending"><span>Pendientes</span><strong id="pending-count">0</strong></div>
-      <div class="summary-card signed"><span>Firmados</span><strong id="signed-count">0</strong></div>
-      <div class="summary-card progress-card"><span>Avance</span><strong id="progress-count">0%</strong></div>
+    <!-- Tarjetas de resumen global -->
+    <section class="summary-grid" aria-label="Resumen global">
+      <div class="summary-card">
+        <span>Total empleados</span>
+        <strong id="total-count">0</strong>
+      </div>
+      <div class="summary-card pending">
+        <span>Pendientes</span>
+        <strong id="pending-count">0</strong>
+      </div>
+      <div class="summary-card signed">
+        <span>Firmados</span>
+        <strong id="signed-count">0</strong>
+      </div>
+      <div class="summary-card progress-card">
+        <span>Avance general</span>
+        <strong id="progress-count">0%</strong>
+        <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar"></div></div>
+      </div>
     </section>
 
+    <!-- Reporte visual por zonas -->
+    <section class="zones-section" aria-label="Reporte por zonas">
+      <div class="zones-header">
+        <div>
+          <span class="eyebrow">Reporte de avance</span>
+          <h2>Firmados por Zona / Dependencia</h2>
+        </div>
+        <button id="toggle-zones-detail" class="button button-quiet" type="button">Ver trabajadores ▾</button>
+      </div>
+      <div id="zones-container" class="zones-grid"></div>
+    </section>
+
+    <!-- Tabla principal y sidebar -->
     <section class="admin-grid">
       <div class="table-panel">
         <div class="panel-heading">
-          <div><span class="eyebrow">Seguimiento</span><h2>Empleados</h2></div>
+          <div><span class="eyebrow">Seguimiento individual</span><h2>Empleados</h2></div>
           <div class="filter-tabs" role="group" aria-label="Filtro de empleados">
             <button class="tab active" data-filter="TODOS">Todos</button>
             <button class="tab" data-filter="PENDIENTE">Pendientes</button>
@@ -79,8 +105,8 @@
         </div>
         <div class="import-card">
           <span class="eyebrow">Carga inicial</span>
-          <h2>Importar CSV</h2>
-          <p class="muted">Lee las celdas de un CSV o Excel y agrega los trabajadores sin borrar firmas existentes.</p>
+          <h2>Importar CSV / Excel</h2>
+          <p class="muted">Agrega trabajadores sin borrar firmas existentes.</p>
           <form id="csv-form"><input type="file" id="csv-file" accept=".csv,.xlsx,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required><button class="button button-secondary button-full">Importar</button></form>
           <div id="import-message" class="message" role="status"></div>
         </div>
@@ -90,8 +116,15 @@
           <p class="muted">Descarga en un ZIP todos los PDFs firmados y el listado de control.</p>
           <a class="button button-primary button-full" href="/admin/descargar-firmados">Descargar firmados</a>
         </div>
+        <div class="import-card">
+          <span class="eyebrow">Reporte</span>
+          <h2>Reporte Excel</h2>
+          <p class="muted">Descarga un reporte en Excel con todos los empleados que ya firmaron, organizado por zona y dependencia.</p>
+          <a class="button button-primary button-full" href="/admin/reporte-excel">Descargar reporte Excel</a>
+        </div>
       </aside>
     </section>
   </main>
 </body>
 </html>
+

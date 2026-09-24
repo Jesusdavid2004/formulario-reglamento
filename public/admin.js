@@ -46,10 +46,93 @@ function updateDependencyFilter() {
 
 function updateSummary() {
   const signed = employees.filter((employee) => employee.estado === 'FIRMADO').length;
-  document.querySelector('#total-count').textContent = employees.length;
-  document.querySelector('#pending-count').textContent = employees.length - signed;
+  const total = employees.length;
+  const pct = total ? Math.round((signed / total) * 100) : 0;
+  document.querySelector('#total-count').textContent = total;
+  document.querySelector('#pending-count').textContent = total - signed;
   document.querySelector('#signed-count').textContent = signed;
-  document.querySelector('#progress-count').textContent = employees.length ? `${Math.round((signed / employees.length) * 100)}%` : '0%';
+  document.querySelector('#progress-count').textContent = `${pct}%`;
+  const bar = document.querySelector('#progress-bar');
+  if (bar) bar.style.width = `${pct}%`;
+}
+
+function getZoneName(dependencia) {
+  if (!dependencia) return 'SIN ZONA';
+  // Las zonas/gerencias principales suelen estar antes del primer " - "
+  const parts = dependencia.split(' - ');
+  return parts[0].trim();
+}
+
+let zonesDetailOpen = false;
+
+function renderZones() {
+  const container = document.querySelector('#zones-container');
+  if (!container) return;
+
+  // Agrupar empleados por zona
+  const zoneMap = new Map();
+  employees.forEach((emp) => {
+    const zone = getZoneName(emp.dependencia);
+    if (!zoneMap.has(zone)) zoneMap.set(zone, { firmados: [], pendientes: [] });
+    if (emp.estado === 'FIRMADO') zoneMap.get(zone).firmados.push(emp);
+    else zoneMap.get(zone).pendientes.push(emp);
+  });
+
+  // Ordenar: primero por nombre de zona
+  const sorted = [...zoneMap.entries()].sort((a, b) => a[0].localeCompare(b[0], 'es'));
+
+  container.innerHTML = sorted.map(([zone, data], idx) => {
+    const total = data.firmados.length + data.pendientes.length;
+    const pct = total ? Math.round((data.firmados.length / total) * 100) : 0;
+    const cardId = `zone-${idx}`;
+
+    const firmadoRows = data.firmados
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      .map((emp) => `
+        <div class="zone-emp-row">
+          <div>
+            <div class="zone-emp-name">${escapeHtml(emp.nombre)}</div>
+            <div class="zone-emp-cedula">${escapeHtml(emp.cedula)} &middot; ${escapeHtml(emp.cargo || '')}</div>
+          </div>
+          <span class="status status-signed">&#10003; Firmó</span>
+        </div>`);
+
+    const pendienteRows = data.pendientes
+      .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+      .map((emp) => `
+        <div class="zone-emp-row">
+          <div>
+            <div class="zone-emp-name">${escapeHtml(emp.nombre)}</div>
+            <div class="zone-emp-cedula">${escapeHtml(emp.cedula)} &middot; ${escapeHtml(emp.cargo || '')}</div>
+          </div>
+          <span class="status status-pending">Pendiente</span>
+        </div>`);
+
+    return `
+      <div class="zone-card">
+        <div class="zone-card-header" data-zone-id="${cardId}">
+          <p class="zone-name">${escapeHtml(zone)}</p>
+          <div class="zone-stats">
+            <span class="zone-count-signed">&#10003; ${data.firmados.length} firmados</span>
+            <span class="zone-count-pending">&#9679; ${data.pendientes.length} pendientes</span>
+            <span class="zone-pct">${pct}%</span>
+          </div>
+        </div>
+        <div class="zone-bar-wrap"><div class="zone-bar-fill" style="width:${pct}%"></div></div>
+        <div class="zone-employees${zonesDetailOpen ? ' open' : ''}" id="${cardId}">
+          ${firmadoRows.join('')}
+          ${pendienteRows.join('')}
+        </div>
+      </div>`;
+  }).join('');
+
+  // Eventos de clic para expandir cada zona
+  container.querySelectorAll('.zone-card-header').forEach((header) => {
+    header.addEventListener('click', () => {
+      const panel = document.getElementById(header.dataset.zoneId);
+      if (panel) panel.classList.toggle('open');
+    });
+  });
 }
 
 async function loadEmployees() {
@@ -57,6 +140,7 @@ async function loadEmployees() {
   employees = await response.json();
   updateDependencyFilter();
   updateSummary();
+  renderZones();
   render();
 }
 
@@ -273,3 +357,15 @@ document.querySelector('#csv-form').addEventListener('submit', async (event) => 
 loadEmployees().catch(() => {
   body.innerHTML = '<tr><td colspan="6" class="empty-state">No fue posible cargar los empleados.</td></tr>';
 });
+
+// Botón de toggle para mostrar/ocultar detalle de todos los grupos
+const toggleZonesBtn = document.querySelector('#toggle-zones-detail');
+if (toggleZonesBtn) {
+  toggleZonesBtn.addEventListener('click', () => {
+    zonesDetailOpen = !zonesDetailOpen;
+    toggleZonesBtn.textContent = zonesDetailOpen ? 'Ocultar trabajadores ▴' : 'Ver trabajadores ▾';
+    document.querySelectorAll('.zone-employees').forEach((panel) => {
+      panel.classList.toggle('open', zonesDetailOpen);
+    });
+  });
+}
