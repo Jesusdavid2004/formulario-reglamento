@@ -24,18 +24,24 @@ const DB_FILE = path.join(DATA_DIR, 'reglamentos.sqlite');
 const SOURCE_DATA_FILE = path.join(ROOT, 'data.js');
 const ACCESS_TOKEN_FILE = path.join(DATA_DIR, '.qr-access-token');
 const OFFICIAL_TEMPLATE_FILE = path.join(ROOT, 'entrega de reglamento firmado 2.docx');
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(PDF_DIR, { recursive: true });
+
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'jesusdavid.villotaa@gmail.com';
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH
   || 'bff6d7976d27b1d029325d81278a661786a0f28857a844a562862d54f0db6738';
-const ADMIN_SESSION_TOKEN = crypto.randomBytes(32).toString('hex');
+const ADMIN_SESSION_TOKEN_FILE = path.join(DATA_DIR, '.admin-session-token');
+const ADMIN_SESSION_TOKEN = process.env.ADMIN_SESSION_TOKEN || (() => {
+  if (fs.existsSync(ADMIN_SESSION_TOKEN_FILE)) return fs.readFileSync(ADMIN_SESSION_TOKEN_FILE, 'utf8').trim();
+  const token = crypto.randomBytes(32).toString('hex');
+  fs.writeFileSync(ADMIN_SESSION_TOKEN_FILE, token, { encoding: 'utf8', flag: 'wx' });
+  return token;
+})();
 const SUPABASE_URL = clean(process.env.SUPABASE_URL);
 const SUPABASE_SERVICE_ROLE_KEY = clean(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
   ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } })
   : null;
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PDF_DIR, { recursive: true });
 
 const ACCESS_TOKEN = process.env.QR_ACCESS_TOKEN || (() => {
   if (fs.existsSync(ACCESS_TOKEN_FILE)) return fs.readFileSync(ACCESS_TOKEN_FILE, 'utf8').trim();
@@ -43,6 +49,18 @@ const ACCESS_TOKEN = process.env.QR_ACCESS_TOKEN || (() => {
   fs.writeFileSync(ACCESS_TOKEN_FILE, token, { encoding: 'utf8', flag: 'wx' });
   return token;
 })();
+
+const sourcePdfDir = path.join(ROOT, 'pdfs');
+if (PERSIST_DIR !== ROOT && fs.existsSync(sourcePdfDir)) {
+  const persistPdfDir = path.join(PERSIST_DIR, 'pdfs');
+  if (!fs.existsSync(persistPdfDir) || fs.readdirSync(persistPdfDir).length === 0) {
+    fs.mkdirSync(persistPdfDir, { recursive: true });
+    for (const file of fs.readdirSync(sourcePdfDir)) {
+      fs.copyFileSync(path.join(sourcePdfDir, file), path.join(persistPdfDir, file));
+    }
+    console.log(`PDFs copiados al volumen persistente (${fs.readdirSync(persistPdfDir).length} archivos).`);
+  }
+}
 
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL');

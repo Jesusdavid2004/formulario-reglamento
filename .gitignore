@@ -3,6 +3,7 @@ data/*.sqlite
 data/*.sqlite-wal
 data/*.sqlite-shm
 data/.qr-access-token
+data/.admin-session-token
 empleados_pasto.xlsx
 .env
 .DS_Store
