@@ -326,22 +326,41 @@ function getLocalPdfMappings(allEmployees) {
   return map;
 }
 
+const SUPABASE_BATCH_SIZE = 100;
+
+function chunk(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 async function seedEmployees(employees) {
   const filtered = employees.map(normalizeEmployee).filter((employee) => employee.cedula && employee.nombre && !employee.cedula.startsWith('VACANTE-'));
   const pdfMap = getLocalPdfMappings(filtered);
 
   if (!supabase) return importEmployees(employees, pdfMap);
+
+  const existingRows = assertSupabase(
+    await supabase.from('empleados').select('cedula, id, estado, fecha_firma'),
+  );
+  const existingByCedula = new Map(existingRows.map((row) => [String(row.cedula).trim(), row]));
+
+  const toInsert = [];
+  const updateGroups = new Map();
+
   for (const employee of filtered) {
-    const existing = await getEmployee(employee.cedula);
     const mappedPdf = pdfMap.get(employee.cedula);
+    const existing = existingByCedula.get(String(employee.cedula).trim());
     if (existing) {
-      const updates = { cargo: employee.cargo, dependencia: employee.dependencia };
+      const payload = { cargo: employee.cargo, dependencia: employee.dependencia };
       if (existing.estado !== 'FIRMADO' && mappedPdf) {
-        updates.estado = 'FIRMADO';
-        updates.pdf_path = mappedPdf;
-        updates.fecha_firma = existing.fecha_firma || 'FIRMADO PREVIO';
+        payload.estado = 'FIRMADO';
+        payload.pdf_path = mappedPdf;
+        payload.fecha_firma = existing.fecha_firma || 'FIRMADO PREVIO';
       }
-      assertSupabase(await supabase.from('empleados').update(updates).eq('id', existing.id));
+      const key = JSON.stringify(payload);
+      if (!updateGroups.has(key)) updateGroups.set(key, { payload, cedulas: [] });
+      updateGroups.get(key).cedulas.push(String(existing.cedula).trim());
     } else {
       const newEmp = { ...employee };
       if (mappedPdf) {
@@ -349,7 +368,16 @@ async function seedEmployees(employees) {
         newEmp.pdf_path = mappedPdf;
         newEmp.fecha_firma = 'FIRMADO PREVIO';
       }
-      await saveEmployee(newEmp);
+      toInsert.push(newEmp);
+    }
+  }
+
+  for (const batch of chunk(toInsert, SUPABASE_BATCH_SIZE)) {
+    assertSupabase(await supabase.from('empleados').upsert(batch, { onConflict: 'cedula', ignoreDuplicates: false }));
+  }
+  for (const { payload, cedulas } of updateGroups.values()) {
+    for (const batch of chunk(cedulas, SUPABASE_BATCH_SIZE)) {
+      assertSupabase(await supabase.from('empleados').update(payload).in('cedula', batch));
     }
   }
 }
@@ -386,11 +414,46 @@ function importEmployees(employees, pdfMap = new Map()) {
   transaction(employees);
 }
 
+async function listUploadedPdfs() {
+  if (!supabase) return new Set();
+  const uploaded = new Set();
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await supabase.storage.from('reglamentos-pdfs').list('pdfs', { limit: 100, offset });
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    data.forEach((item) => { if (item.name) uploaded.add(item.name); });
+    offset += data.length;
+    if (data.length < 100) break;
+  }
+  return uploaded;
+}
+
 async function syncAllPdfs() {
   if (!fs.existsSync(PDF_DIR)) return;
   const pdfFiles = fs.readdirSync(PDF_DIR).filter((f) => f.toLowerCase().endsWith('.pdf'));
 
   console.log(`Iniciando sincronización de ${pdfFiles.length} PDFs...`);
+
+  let uploadedPdfNames = new Set();
+  if (supabase) {
+    try {
+      uploadedPdfNames = await listUploadedPdfs();
+      console.log(`  PDFs ya presentes en Supabase: ${uploadedPdfNames.size}`);
+    } catch (error) {
+      console.warn('  No se pudo listar los PDFs de Supabase; se intentará subir todos:', error.message);
+    }
+  }
+
+  let existingByCedula = new Map();
+  if (supabase) {
+    const rows = assertSupabase(await supabase.from('empleados').select('id, cedula, estado, fecha_firma'));
+    existingByCedula = new Map(rows.map((row) => [String(row.cedula).trim(), row]));
+  }
+
+  const toUpdate = [];
+  const toInsert = [];
+  const toUpload = [];
 
   for (const file of pdfFiles) {
     const relativePath = path.join('pdfs', file).replace(/\\/g, '/');
@@ -408,32 +471,17 @@ async function syncAllPdfs() {
 
     if (!cedula) continue;
 
-    const existing = await getEmployee(cedula);
+    const existing = supabase
+      ? existingByCedula.get(String(cedula).trim())
+      : db.prepare('SELECT id, estado, fecha_firma FROM empleados WHERE cedula = ?').get(cedula);
 
     if (existing) {
       const shouldUpdate = existing.estado !== 'FIRMADO' || !existing.pdf_path;
       if (shouldUpdate) {
-        const fecha = existing.fecha_firma || 'FIRMADO PREVIO';
-        if (supabase) {
-          await supabase.from('empleados').update({
-            estado: 'FIRMADO',
-            fecha_firma: fecha,
-            pdf_path: relativePath,
-            autorizacion_datos: true,
-          }).eq('id', existing.id);
-        } else {
-          db.prepare(`
-            UPDATE empleados
-            SET estado = 'FIRMADO',
-                fecha_firma = COALESCE(fecha_firma, ?),
-                pdf_path = ?,
-                autorizacion_datos = 1
-            WHERE id = ?
-          `).run(fecha, relativePath, existing.id);
-        }
+        toUpdate.push({ id: existing.id, fecha: existing.fecha_firma || 'FIRMADO PREVIO', relativePath });
       }
     } else {
-      const newEmp = {
+      toInsert.push({
         cedula,
         nombre: nombre || 'EMPLEADO CEDENAR',
         cargo: 'EMPLEADO',
@@ -442,35 +490,57 @@ async function syncAllPdfs() {
         fecha_firma: 'FIRMADO PREVIO',
         autorizacion_datos: 1,
         pdf_path: relativePath,
-      };
-      if (supabase) {
-        await supabase.from('empleados').insert({
-          cedula: newEmp.cedula,
-          nombre: newEmp.nombre,
-          cargo: newEmp.cargo,
-          dependencia: newEmp.dependencia,
-          estado: newEmp.estado,
-          fecha_firma: newEmp.fecha_firma,
-          autorizacion_datos: true,
-          pdf_path: newEmp.pdf_path,
-        });
-      } else {
-        db.prepare(`
-          INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado, fecha_firma, autorizacion_datos, pdf_path)
-          VALUES (@cedula, @nombre, @cargo, @dependencia, @estado, @fecha_firma, @autorizacion_datos, @pdf_path)
-        `).run(newEmp);
-      }
+      });
     }
 
+    if (supabase && !uploadedPdfNames.has(file)) toUpload.push(file);
+  }
+
+  for (const item of toUpdate) {
     if (supabase) {
+      await supabase.from('empleados').update({
+        estado: 'FIRMADO',
+        fecha_firma: item.fecha,
+        pdf_path: item.relativePath,
+        autorizacion_datos: true,
+      }).eq('id', item.id);
+    } else {
+      db.prepare(`
+        UPDATE empleados
+        SET estado = 'FIRMADO',
+            fecha_firma = COALESCE(fecha_firma, ?),
+            pdf_path = ?,
+            autorizacion_datos = 1
+        WHERE id = ?
+      `).run(item.fecha, item.relativePath, item.id);
+    }
+  }
+
+  for (const batch of chunk(toInsert, SUPABASE_BATCH_SIZE)) {
+    if (supabase) {
+      await supabase.from('empleados').insert(batch.map((row) => ({ ...row, autorizacion_datos: true })));
+    } else {
+      const insertRow = db.prepare(`
+        INSERT INTO empleados (cedula, nombre, cargo, dependencia, estado, fecha_firma, autorizacion_datos, pdf_path)
+        VALUES (@cedula, @nombre, @cargo, @dependencia, @estado, @fecha_firma, @autorizacion_datos, @pdf_path)
+      `);
+      for (const row of batch) insertRow.run(row);
+    }
+  }
+
+  if (supabase) {
+    let subidos = 0;
+    for (const file of toUpload) {
       try {
-        const fullLocalPath = path.join(PDF_DIR, file);
-        const bytes = fs.readFileSync(fullLocalPath);
+        const relativePath = path.join('pdfs', file).replace(/\\/g, '/');
+        const bytes = fs.readFileSync(path.join(PDF_DIR, file));
         await uploadPdf(relativePath, bytes);
+        subidos++;
       } catch (err) {
         console.warn(`Aviso al subir PDF a Supabase (${file}):`, err.message);
       }
     }
+    if (subidos > 0) console.log(`  PDFs subidos a Supabase: ${subidos}`);
   }
 
   console.log('Sincronización de PDFs completada con éxito.');
@@ -610,6 +680,12 @@ const dataReady = seedFromDataJs().catch((error) => {
   console.error('No fue posible cargar empleados:', error);
   return false;
 });
+function waitDataReady(timeoutMs = 30000) {
+  return Promise.race([
+    dataReady,
+    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
 app.use(express.json({ limit: '2mb' }));
 app.use((req, res, next) => {
   if (req.path === '/' || req.path === '/index.html') return requireQrAccess(req, res, next);
@@ -618,7 +694,7 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(ROOT, 'public')));
 
 app.get('/empleado/:cedula', requireQrAccess, async (req, res) => {
-  await dataReady;
+  await waitDataReady();
   const employee = await getEmployee(clean(req.params.cedula));
   if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
   return res.json(employee);
@@ -626,7 +702,7 @@ app.get('/empleado/:cedula', requireQrAccess, async (req, res) => {
 
 app.get('/empleados', requireAdminAccess, async (req, res) => {
   try {
-    await dataReady;
+    await waitDataReady();
     if (dataLoadError) return res.status(503).json({ error: 'Supabase no permite leer la tabla de empleados. Revisa los permisos de la tabla.' });
     const status = clean(req.query.estado).toUpperCase();
     const employees = status && ['PENDIENTE', 'FIRMADO'].includes(status) ? await getEmployees(status) : await getEmployees();
@@ -639,7 +715,7 @@ app.get('/empleados', requireAdminAccess, async (req, res) => {
 
 app.post('/firmar', requireQrAccess, async (req, res) => {
   try {
-    await dataReady;
+    await waitDataReady();
     const cedula = clean(req.body.cedula);
     const firma = clean(req.body.firma);
     const autorizacion = req.body.autorizacion === true;
@@ -692,7 +768,7 @@ app.get('/admin/formato', requireAdminAccess, async (req, res) => {
 
 app.post('/admin/importar-csv', requireAdminAccess, upload.single('archivo'), async (req, res) => {
   try {
-    await dataReady;
+    await waitDataReady();
     if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo CSV' });
     const records = parseImportFile(req.file);
     if (!records.some((record) => clean(record.cedula) && clean(record.nombre))) {
@@ -752,7 +828,7 @@ app.get('/admin/descargar-firmados', requireAdminAccess, async (req, res) => {
 
 app.get('/admin/reporte-excel', requireAdminAccess, async (req, res) => {
   try {
-    await dataReady;
+    await waitDataReady();
     const signedEmployees = await getEmployees('FIRMADO');
 
     const getZoneName = (dependencia) => {
