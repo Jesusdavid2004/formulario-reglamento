@@ -18,14 +18,25 @@ function setMessage(text, type = '') {
   message.className = `message ${type}`;
 }
 
+let canvasWidth = 0;
+let canvasScale = 0;
+
 function resizeCanvas() {
   const ratio = Math.max(window.devicePixelRatio || 1, 1);
   const width = canvas.offsetWidth;
-  const height = 220;
+  const height = canvas.offsetHeight || 220;
+  if (!width || (width === canvasWidth && ratio === canvasScale)) return;
+  const data = signaturePad.isEmpty() ? null : signaturePad.toDataURL();
+  canvasWidth = width;
+  canvasScale = ratio;
   canvas.width = width * ratio;
   canvas.height = height * ratio;
   canvas.getContext('2d').scale(ratio, ratio);
-  signaturePad.clear();
+  if (data) {
+    signaturePad.fromDataURL(data);
+  } else {
+    signaturePad.clear();
+  }
 }
 
 function resetEmployee() {
@@ -72,7 +83,11 @@ cedulaInput.addEventListener('input', () => {
 });
 
 document.querySelector('#clear-signature').addEventListener('click', () => signaturePad.clear());
-window.addEventListener('resize', resizeCanvas);
+let resizeTimer;
+window.addEventListener('resize', () => {
+  window.clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(resizeCanvas, 100);
+});
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();

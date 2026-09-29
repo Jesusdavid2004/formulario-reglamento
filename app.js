@@ -117,6 +117,13 @@ function clean(value) {
   return String(value ?? '').trim();
 }
 
+function storagePdfKey(pdfPath) {
+  const base = path.basename(String(pdfPath || ''));
+  const safeName = base.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9_.-]+/g, '_').replace(/_+/g, '_');
+  return path.posix.join('pdfs', safeName);
+}
+
 function normalizeEmployee(employee) {
   return {
     cedula: clean(employee.cedula) || (employee.esVacante ? `VACANTE-${employee.id}` : ''),
@@ -201,18 +208,22 @@ async function uploadPdf(pdfPath, bytes) {
     fs.writeFileSync(path.join(PDF_DIR, path.basename(pdfPath)), bytes);
     return;
   }
-  assertSupabase(await supabase.storage.from('reglamentos-pdfs').upload(pdfPath, bytes, { contentType: 'application/pdf', upsert: true }));
+  const key = storagePdfKey(pdfPath);
+  assertSupabase(await supabase.storage.from('reglamentos-pdfs').upload(key, bytes, { contentType: 'application/pdf', upsert: true }));
 }
 
 async function downloadPdf(pdfPath) {
   if (supabase) {
-    try {
-      const result = await supabase.storage.from('reglamentos-pdfs').download(pdfPath);
-      if (!result.error && result.data) {
-        return Buffer.from(await result.data.arrayBuffer());
+    const keys = [...new Set([storagePdfKey(pdfPath), pdfPath])];
+    for (const key of keys) {
+      try {
+        const result = await supabase.storage.from('reglamentos-pdfs').download(key);
+        if (!result.error && result.data) {
+          return Buffer.from(await result.data.arrayBuffer());
+        }
+      } catch (err) {
+        console.warn(`No se pudo descargar de Supabase Storage (${key}):`, err.message);
       }
-    } catch (err) {
-      console.warn(`No se pudo descargar de Supabase Storage (${pdfPath}):`, err.message);
     }
   }
   const localFile = path.join(PDF_DIR, path.basename(pdfPath));
@@ -229,7 +240,7 @@ async function removePdf(pdfPath) {
     if (fs.existsSync(localPath)) fs.unlinkSync(localPath);
     return;
   }
-  assertSupabase(await supabase.storage.from('reglamentos-pdfs').remove([pdfPath]));
+  assertSupabase(await supabase.storage.from('reglamentos-pdfs').remove([storagePdfKey(pdfPath)]));
 }
 
 function sourceEmployees() {
@@ -493,7 +504,7 @@ async function syncAllPdfs() {
       });
     }
 
-    if (supabase && !uploadedPdfNames.has(file)) toUpload.push(file);
+    if (supabase && !uploadedPdfNames.has(path.posix.basename(storagePdfKey(relativePath)))) toUpload.push(file);
   }
 
   for (const item of toUpdate) {
